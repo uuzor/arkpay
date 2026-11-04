@@ -456,6 +456,84 @@ export function hasToolActivity(result: unknown): boolean {
 }
 
 /**
+ * Chat memory: durable per-user facts the agent keeps across turns and
+ * restarts (preferred name, business, default currency...). Raw conversation
+ * lives in AgentMessage; this is the distilled layer. All helpers are pure
+ * so the node:test gate pins them without a database.
+ */
+
+export interface ChatMemoryEntry {
+  key: string;
+  value: string;
+}
+
+/** snake_case, 1–32 chars: the only key shape remember_fact accepts. */
+export const MEMORY_KEY_RE = /^[a-z][a-z0-9_]{0,31}$/;
+
+export const MAX_MEMORY_VALUE_CHARS = 500;
+
+/** Suggested keys; the model may coin its own snake_case keys beyond these. */
+export const MEMORY_KEY_HINTS = [
+  'display_name',
+  'business_name',
+  'default_currency',
+  'timezone',
+  'contact_note',
+  'communication_style',
+] as const;
+
+export function normalizeMemoryKey(key: unknown): string | null {
+  if (typeof key !== 'string') return null;
+  const normalized = key.trim().toLowerCase().replace(/[\s-]+/g, '_');
+  if (!MEMORY_KEY_RE.test(normalized)) return null;
+  return normalized;
+}
+
+export function normalizeMemoryValue(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim().replace(/\s+/g, ' ').slice(0, MAX_MEMORY_VALUE_CHARS);
+  return trimmed || null;
+}
+
+/**
+ * Prompt block for what the agent remembers about this user. Empty when no
+ * facts are stored — never tell the model to invent memories.
+ */
+export function memoryBlockForPrompt(
+  memories: ChatMemoryEntry[] | null | undefined,
+): string {
+  const rows = (memories ?? []).filter(
+    (m) => m && normalizeMemoryKey(m.key) && normalizeMemoryValue(m.value),
+  );
+  if (rows.length === 0) return '';
+  const lines = rows.map(
+    (m) => `- ${normalizeMemoryKey(m.key)}: ${normalizeMemoryValue(m.value)}`,
+  );
+  return `What you remember about this user (saved from earlier chats — trust it, don't re-ask):\n${lines.join('\n')}`;
+}
+
+/**
+ * Char-budget history for the model call: newest turns first until the
+ * budget is spent, then back to chronological order. Count alone (MAX_HISTORY
+ * rows) can still blow the context when turns carry long tool payloads; the
+ * budget keeps the call bounded while always keeping the newest turns.
+ */
+export function selectHistoryBudget<T extends { content: string }>(
+  messages: T[],
+  maxChars = 24_000,
+): T[] {
+  const picked: T[] = [];
+  let used = 0;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const len = messages[i].content.length;
+    if (picked.length > 0 && used + len > maxChars) break;
+    picked.push(messages[i]);
+    used += len;
+  }
+  return picked.reverse();
+}
+
+/**
  * One-line shape summary for an empty model result: finish reasons, per-step
  * text/call/result counts, warnings, usage. Logged with the retry warning so
  * the next silent turn explains itself instead of just falling back.

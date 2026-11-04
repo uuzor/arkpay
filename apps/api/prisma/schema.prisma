@@ -78,6 +78,23 @@ model Email {
   @@index([workspaceId])
 }
 
+// Durable per-user memory for the AI agent: facts worth keeping across turns
+// and restarts (preferred name, business, default currency, recurring payees,
+// timezone...). Raw conversation stays in AgentMessage; this is the distilled
+// layer the model reads every turn and writes via remember_fact/forget_fact.
+model ChatMemory {
+  id          String   @id @default(cuid())
+  workspaceId String // tenant
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  userId      String // same thread key as AgentMessage (telegram id / chat id)
+  key         String // snake_case fact name, e.g. display_name
+  value       String // short fact text, max ~500 chars
+  updatedAt   DateTime @updatedAt
+
+  @@unique([workspaceId, userId, key])
+  @@index([workspaceId, userId])
+}
+
 // Gmail history cursor. One row per mailbox (GMAIL_ADDRESS). The checkpoint is
 // written in the same transaction as the Email inserts, so a crash can never
 // advance the cursor past rows that were not stored.
@@ -306,6 +323,7 @@ model Workspace {
   telegramLink       TelegramLink?
   emails             Email[]
   agentMessages      AgentMessage[]
+  chatMemories       ChatMemory[]
   checkpoints        GmailCheckpoint[]
   contacts           Contact[]
   actions            Action[]

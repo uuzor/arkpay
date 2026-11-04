@@ -280,10 +280,11 @@ export class TelegramUpdate {
   @Command('reset')
   async reset(@Ctx() ctx: Context): Promise<void> {
     if (!ctx.from) return;
-    if (!(await this.requireLink(ctx))) return;
-    await this.agent.clearHistory(ctx.from.id);
+    const workspaceId = await this.requireLink(ctx);
+    if (!workspaceId) return;
+    await this.agent.clearHistory(ctx.from.id, workspaceId);
     this.agent.cancelPending(ctx.from.id);
-    await ctx.reply('Conversation history cleared.');
+    await ctx.reply('Conversation history and saved memory cleared.');
   }
 
   @Command('whoami')

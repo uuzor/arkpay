@@ -15,15 +15,21 @@ import {
   type ScheduleUpdate,
 } from '../scheduler/scheduler.service';
 import {
+  MEMORY_KEY_HINTS,
   RETRY_NUDGE,
   buildScheduleCreate,
   describeActionResult,
   hasToolActivity,
+  memoryBlockForPrompt,
   mergeInvoiceFollowUp,
   missingFieldsQuestion,
+  normalizeMemoryKey,
+  normalizeMemoryValue,
   parseDraftFollowUp,
   parseInvoiceFirstTurn,
+  selectHistoryBudget,
   summarizeEmptyResult,
+  type ChatMemoryEntry,
   type InvoicePendingFields,
 } from './agent-replies';
 import {
@@ -243,10 +249,71 @@ export class AgentService {
     return 'This Telegram chat is not linked to an ArkPay workspace yet. Get your pairing code from the dashboard (Settings → Telegram), then send /link ARKPAY-XXXXXX here.';
   }
 
-  async clearHistory(userId: number): Promise<void> {
-    await this.prisma.agentMessage.deleteMany({
-      where: { userId: String(userId) },
+  /**
+   * Thread-scoped wipe: history AND saved memory for this workspace thread.
+   * Scoped by workspace — a user linked to several workspaces only resets
+   * the one they are chatting in.
+   */
+  async clearHistory(userId: number, workspaceId?: string): Promise<void> {
+    const scope = { userId: String(userId), ...(workspaceId ? { workspaceId } : {}) };
+    await this.prisma.agentMessage.deleteMany({ where: scope });
+    await this.prisma.chatMemory.deleteMany({ where: scope });
+  }
+
+  /** Durable facts for this thread, oldest first (stable prompt order). */
+  async loadMemory(userId: number, workspaceId: string): Promise<ChatMemoryEntry[]> {
+    const rows = await this.prisma.chatMemory.findMany({
+      where: { userId: String(userId), workspaceId },
+      orderBy: { key: 'asc' },
+      select: { key: true, value: true },
     });
+    return rows;
+  }
+
+  /**
+   * Save one durable fact. Returns the normalized key, or an error message
+   * the tool passes back to the model. Never throws for bad input — a model
+   * retry loop on a validation throw can stall the turn.
+   */
+  async rememberFact(
+    userId: number,
+    workspaceId: string,
+    key: unknown,
+    value: unknown,
+  ): Promise<{ ok: boolean; key?: string; error?: string }> {
+    const k = normalizeMemoryKey(key);
+    const v = normalizeMemoryValue(value);
+    if (!k) {
+      return {
+        ok: false,
+        error: `key must be snake_case a-z0-9_, 1-32 chars (e.g. ${MEMORY_KEY_HINTS.join(', ')})`,
+      };
+    }
+    if (!v) {
+      return { ok: false, error: 'value must be a non-empty fact (max 500 chars)' };
+    }
+    await this.prisma.chatMemory.upsert({
+      where: {
+        workspaceId_userId_key: { workspaceId, userId: String(userId), key: k },
+      },
+      update: { value: v },
+      create: { workspaceId, userId: String(userId), key: k, value: v },
+    });
+    return { ok: true, key: k };
+  }
+
+  async forgetFact(
+    userId: number,
+    workspaceId: string,
+    key: unknown,
+  ): Promise<{ ok: boolean; key?: string; error?: string }> {
+    const k = normalizeMemoryKey(key);
+    if (!k) return { ok: false, error: 'key must be snake_case a-z0-9_, 1-32 chars' };
+    const deleted = await this.prisma.chatMemory.deleteMany({
+      where: { workspaceId, userId: String(userId), key: k },
+    });
+    if (deleted.count === 0) return { ok: false, error: `no saved fact "${k}"` };
+    return { ok: true, key: k };
   }
 
   cancelPending(userId: number): void {
@@ -295,6 +362,9 @@ export class AgentService {
     const history = options.ephemeral
       ? []
       : await this.loadHistory(userId, workspaceId);
+    const memories = options.ephemeral
+      ? []
+      : await this.loadMemory(userId, workspaceId);
     const model = this.model();
     const tools = await this.buildTools(userId, documentRef, resolved);
     // Lazy require keeps the huge AI SDK type graph out of the Nest tsc build.
@@ -313,7 +383,7 @@ export class AgentService {
     ) =>
       generateText({
         model,
-        system: this.promptWithExtra(userId, options),
+        system: this.promptWithExtra(userId, options, memories),
         messages: [
           ...history,
           { role: 'user', content: message },
@@ -575,8 +645,12 @@ export class AgentService {
     };
   }
 
-  private promptWithExtra(userId: number, options: AgentRunOptions): string {
-    const base = this.systemPrompt(userId, options.readOnly);
+  private promptWithExtra(
+    userId: number,
+    options: AgentRunOptions,
+    memories: ChatMemoryEntry[] = [],
+  ): string {
+    const base = this.systemPrompt(userId, options.readOnly, memories);
     const extra = options.systemExtra?.trim();
     return extra ? `${base}\nDashboard context: ${extra.slice(0, 2_000)}` : base;
   }
@@ -658,6 +732,9 @@ export class AgentService {
     const history = options.ephemeral
       ? []
       : await this.loadHistory(userId, workspaceId);
+    const memories = options.ephemeral
+      ? []
+      : await this.loadMemory(userId, workspaceId);
     const model = this.model();
     const tools = await this.buildTools(userId, documentRef, resolved);
     // Lazy require keeps the huge AI SDK type graph out of the Nest tsc build.
@@ -681,7 +758,7 @@ export class AgentService {
         documentRef.current = null;
         const result = streamText({
           model,
-          system: this.promptWithExtra(userId, options),
+          system: this.promptWithExtra(userId, options, memories),
           messages: [
             ...history,
             { role: 'user', content: message },
@@ -926,7 +1003,11 @@ RULES:
     return provider.chatModel(modelName);
   }
 
-  private systemPrompt(userId: number, readOnly = false): string {
+  private systemPrompt(
+    userId: number,
+    readOnly = false,
+    memories: ChatMemoryEntry[] = [],
+  ): string {
     const pending = readOnly ? undefined : this.pendingDrafts.get(userId);
     const pendingLine =
       pending && pending.expiresAt > Date.now()
@@ -954,6 +1035,13 @@ RULES:
 
     return `You are ArkPay, the payments assistant for a freelancer/micro-business owner. Today is ${new Date().toISOString().slice(0, 10)}.
 ${readOnly ? 'This turn is a scheduled task. You are READ-ONLY: do not create invoice or payout drafts, do not send reminders, do not create or change schedules, and do not suggest that money has moved. Answer with a concise report or notification only.\n' : ''}${pendingLine}${pendingPayoutLine}
+${memoryBlockForPrompt(memories)}
+
+CONVERSATION:
+- This is an ongoing conversation, not a first meeting — the history above is what was already said. Never re-introduce yourself or say hi again mid-conversation; just continue naturally.
+- When the user tells you something durable about themselves (their name, business, preferred currency, timezone, recurring payees, how they like things done), save it with remember_fact so you still know it next time. Confirm briefly what you saved.
+- Use recall_memory when you need to check what you know before asking the user for something they may already have told you. Never ask for a fact you already remember.
+- If the user corrects a saved fact, overwrite it with remember_fact; if they say "forget X", call forget_fact.
 
 BEHAVIOUR:
 - Greet the user naturally when they greet you. Do not dump a menu unless they ask for help.
@@ -1444,6 +1532,46 @@ BEHAVIOUR:
           }
         },
       }),
+      remember_fact: tool({
+        description:
+          'Save a durable fact about this user for future chats (their name, business, preferred currency, timezone, recurring payees, preferences). Key must be snake_case; value one short fact. Use whenever the user tells you something durable — then confirm briefly what you saved.',
+        inputSchema: z.object({
+          key: z
+            .string()
+            .min(1)
+            .max(32)
+            .describe(
+              `snake_case fact name, e.g. ${MEMORY_KEY_HINTS.join(', ')}`,
+            ),
+          value: z
+            .string()
+            .min(1)
+            .max(500)
+            .describe('The fact, one short sentence'),
+        }),
+        execute: async ({ key, value }) =>
+          this.rememberFact(userId, options.workspaceId, key, value),
+      }),
+
+      recall_memory: tool({
+        description:
+          'List everything you remember about this user. Use before asking for something they may already have told you.',
+        inputSchema: z.object({}),
+        execute: async () => ({
+          facts: await this.loadMemory(userId, options.workspaceId),
+        }),
+      }),
+
+      forget_fact: tool({
+        description:
+          'Forget one saved fact by key. Use when the user says "forget X" or a saved fact is wrong and should be removed rather than overwritten.',
+        inputSchema: z.object({
+          key: z.string().min(1).max(32).describe('snake_case fact name'),
+        }),
+        execute: async ({ key }) =>
+          this.forgetFact(userId, options.workspaceId, key),
+      }),
+
       ...(await this.paypalReadTools(options.workspaceId)),
     };
     if (options.readOnly) {
@@ -1452,6 +1580,8 @@ BEHAVIOUR:
       delete tools.follow_up_invoice;
       delete tools.create_schedule;
       delete tools.update_schedule;
+      delete tools.remember_fact;
+      delete tools.forget_fact;
     }
     return tools;
   }
@@ -1573,10 +1703,13 @@ BEHAVIOUR:
       orderBy: { createdAt: 'desc' },
       take: MAX_HISTORY,
     });
-    return rows.reverse().map((row) => ({
+    // Chronological, per-message capped, then char-budgeted newest-first so
+    // one long turn can never push the whole thread out of context.
+    const turns = rows.reverse().map((row) => ({
       role: row.role === 'assistant' ? 'assistant' : 'user',
       content: row.content.slice(0, 8_000),
     }));
+    return selectHistoryBudget(turns);
   }
 
   private async saveMessage(

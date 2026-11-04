@@ -1,13 +1,18 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  MEMORY_KEY_HINTS,
   buildScheduleCreate,
   describeActionResult,
   hasToolActivity,
+  memoryBlockForPrompt,
   mergeInvoiceFollowUp,
   missingFieldsQuestion,
+  normalizeMemoryKey,
+  normalizeMemoryValue,
   parseDraftFollowUp,
   parseInvoiceFirstTurn,
+  selectHistoryBudget,
   summarizeEmptyResult,
 } from './agent-replies';
 
@@ -352,4 +357,60 @@ test('summarizeEmptyResult renders a one-line shape summary', () => {
       'warnings=0 usage={"inputTokens":10}',
   );
   assert.equal(summarizeEmptyResult(null), 'no result');
+});
+
+test('normalizeMemoryKey accepts snake_case, trims and coerces spaces', () => {
+  assert.equal(normalizeMemoryKey('display_name'), 'display_name');
+  assert.equal(normalizeMemoryKey('  Display Name '), 'display_name');
+  assert.equal(normalizeMemoryKey('my-key'), 'my_key');
+  assert.equal(normalizeMemoryKey('UPPER-AT'), 'upper_at');
+  for (const bad of ['', 'has space!', '9lives', 'a'.repeat(33), 42, null]) {
+    assert.equal(normalizeMemoryKey(bad), null);
+  }
+});
+
+test('normalizeMemoryValue trims, collapses whitespace and caps length', () => {
+  assert.equal(normalizeMemoryValue('  Ada   Lovelace  '), 'Ada Lovelace');
+  assert.equal(normalizeMemoryValue(''), null);
+  assert.equal(normalizeMemoryValue('   '), null);
+  const long = normalizeMemoryValue('x'.repeat(600));
+  assert.equal(long?.length, 500);
+});
+
+test('memoryBlockForPrompt renders saved facts, empty when none', () => {
+  assert.equal(memoryBlockForPrompt([]), '');
+  assert.equal(memoryBlockForPrompt(null), '');
+  const block = memoryBlockForPrompt([
+    { key: 'display_name', value: 'Victor' },
+    { key: 'default_currency', value: 'USD' },
+  ]);
+  assert.match(block, /display_name: Victor/);
+  assert.match(block, /default_currency: USD/);
+  assert.match(block, /don't re-ask/);
+  // Invalid rows never reach the model.
+  assert.equal(
+    memoryBlockForPrompt([{ key: '!!!', value: 'x' }]),
+    '',
+  );
+});
+
+test('MEMORY_KEY_HINTS covers the facts the prompt asks the model to save', () => {
+  for (const hint of ['display_name', 'default_currency', 'timezone']) {
+    assert.ok((MEMORY_KEY_HINTS as readonly string[]).includes(hint));
+  }
+});
+
+test('selectHistoryBudget keeps the newest turns inside a char budget', () => {
+  const mk = (n: number, len: number) => ({
+    role: 'user',
+    content: `${n}:` + 'x'.repeat(len),
+  });
+  const msgs = [mk(1, 100), mk(2, 100), mk(3, 100)];
+  assert.deepStrictEqual(selectHistoryBudget(msgs, 250).map((m) => m.content.slice(0, 2)), ['2:', '3:']);
+  // Newest turn is always kept even when it alone exceeds the budget.
+  const huge = selectHistoryBudget([mk(1, 50), mk(2, 10_000)], 100);
+  assert.equal(huge.length, 1);
+  assert.match(huge[0].content, /^2:/);
+  // Everything fits: order preserved.
+  assert.deepStrictEqual(selectHistoryBudget(msgs, 10_000).length, 3);
 });
