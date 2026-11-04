@@ -50,12 +50,16 @@ export class GmailPollerService implements OnModuleDestroy {
 
   private async tick(): Promise<void> {
     await this.syncAllMailboxes();
-    // Pipeline: turn NEW emails into actions/cards (or terminal statuses).
+    // Pipeline: turn NEW emails into pre-draft asks, actions/cards (or
+    // terminal statuses).
     try {
       const run = await this.pipeline.processNewEmails(5);
-      if (!run.skipped && (run.carded > 0 || run.errors.length > 0)) {
+      if (
+        !run.skipped &&
+        (run.carded > 0 || run.asked > 0 || run.errors.length > 0)
+      ) {
         this.logger.log(
-          `pipeline: ${run.carded} card(s), ${run.ignored} ignored, ${run.needsReview} review, ${run.errors.length} error(s)`,
+          `pipeline: ${run.carded} card(s), ${run.asked} ask(s), ${run.ignored} ignored, ${run.needsReview} review, ${run.errors.length} error(s)`,
         );
       }
     } catch (e) {

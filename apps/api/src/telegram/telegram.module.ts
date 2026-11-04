@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TelegrafModule } from 'nestjs-telegraf';
 import { AgentChatController } from '../agent/agent-chat.controller';
@@ -9,7 +9,9 @@ import { ContactsModule } from '../contacts/contacts.module';
 import { LlmModule } from '../llm/llm.module';
 import { PaypalModule } from '../paypal/paypal.module';
 import { PayoutsModule } from '../payouts/payouts.module';
+import { PipelineModule } from '../pipeline/pipeline.module';
 import { SafetyModule } from '../safety/safety.module';
+import { SchedulerModule } from '../scheduler/scheduler.module';
 import { CreationController } from './creation.controller';
 import { DraftService } from './drafts.service';
 import { InvoiceFollowupService } from './invoice-followup.service';
@@ -31,6 +33,12 @@ import { TranscriptionService } from './transcription.service';
     LlmModule,
     PaypalModule,
     SafetyModule,
+    // Cycle with SchedulerModule (handlers need AgentService, agent schedule
+    // tools need SchedulerService) is request-time safe via forwardRef.
+    forwardRef(() => SchedulerModule),
+    // Cycle with PipelineModule (pre-draft taps confirm/decline via
+    // PipelineService; pipeline sends cards via TelegramService).
+    forwardRef(() => PipelineModule),
     TelegrafModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

@@ -19,6 +19,7 @@ export const ACTION_TYPE_FILTERS = [
 export const EMAIL_STATUS_FILTERS = [
   { value: null, label: "All" },
   { value: "NEW", label: "New" },
+  { value: "AWAITING_CONFIRM", label: "Awaiting confirm" },
   { value: "PROCESSED", label: "Processed" },
   { value: "NEEDS_REVIEW", label: "Needs review" },
   { value: "IGNORED", label: "Ignored" },
@@ -42,6 +43,7 @@ export function actionTone(status) {
 
 const EMAIL_TONE = {
   NEW: { status: "pending", label: "New" },
+  AWAITING_CONFIRM: { status: "pending", label: "Awaiting confirm" },
   PROCESSED: { status: "executed", label: "Processed" },
   NEEDS_REVIEW: { status: "pending", label: "Needs review" },
   IGNORED: { status: "ignored", label: "Ignored" },

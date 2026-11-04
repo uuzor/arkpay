@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import {
   Action,
   Command,
@@ -19,6 +19,7 @@ import { AuditService } from '../audit/audit.service';
 import { PayrollService } from '../payouts/payroll.service';
 import { isValidPeriod, periodInTimezone } from '../payouts/payroll-period';
 import { PayoutsService } from '../payouts/payouts.service';
+import { PipelineService } from '../pipeline/pipeline.service';
 import { SafetyService } from '../safety/safety.service';
 import {
   DecisionService,
@@ -53,6 +54,10 @@ export class TelegramUpdate {
     private readonly audit: AuditService,
     private readonly safety: SafetyService,
     private readonly workspaces: WorkspacesService,
+    // Cycle with PipelineModule (pipeline sends cards via TelegramService)
+    // is request-time safe via forwardRef on both modules.
+    @Inject(forwardRef(() => PipelineService))
+    private readonly pipeline: PipelineService,
   ) {}
 
   /**
@@ -299,7 +304,8 @@ export class TelegramUpdate {
     const workspaceId = await this.requireLink(ctx);
     if (!workspaceId) return;
     const actions = await this.decision.listPending(25, workspaceId);
-    if (actions.length === 0) {
+    const awaiting = await this.pipeline.listAwaitingConfirm(workspaceId);
+    if (actions.length === 0 && awaiting.length === 0) {
       await ctx.reply('No pending approvals.');
       return;
     }
@@ -314,14 +320,26 @@ export class TelegramUpdate {
           .map((a) => a.batchId as string),
       ),
     ].slice(0, 2);
-    await ctx.reply(
-      `${actions.length} open approval(s) (${singles.length} single(s), ${batchIds.length} batch(es)):`,
-    );
-    for (const action of singles) {
-      await this.telegram.sendDecisionCard(action.id);
+    if (actions.length > 0) {
+      await ctx.reply(
+        `${actions.length} open approval(s) (${singles.length} single(s), ${batchIds.length} batch(es)):`,
+      );
+      for (const action of singles) {
+        await this.telegram.sendDecisionCard(action.id);
+      }
+      for (const batchId of batchIds) {
+        await this.telegram.sendBatchCard(batchId);
+      }
     }
-    for (const batchId of batchIds) {
-      await this.telegram.sendBatchCard(batchId);
+    // Pre-draft asks have no action yet — re-surface them so a missed ask
+    // never strands an email.
+    if (awaiting.length > 0) {
+      await ctx.reply(
+        `${awaiting.length} email(s) waiting for draft confirm:`,
+      );
+      for (const email of awaiting.slice(0, 3)) {
+        await this.telegram.sendPredraftAsk(email.id);
+      }
     }
   }
 
@@ -692,6 +710,90 @@ export class TelegramUpdate {
         break;
       default:
         await this.answer(ctx, 'Action not found', true);
+    }
+  }
+
+  @Action(/^(draft-yes|draft-no):(.+)$/)
+  async onPredraftDecision(@Ctx() ctx: CallbackContext): Promise<void> {
+    const verb = ctx.match?.[1];
+    const emailId = ctx.match?.[2];
+    if (!verb || !emailId) {
+      await ctx.answerCbQuery('Malformed action');
+      return;
+    }
+    const workspaceId = await this.workspaces.resolveForTelegram(
+      ctx.from?.id ?? 0,
+    );
+    if (!workspaceId) {
+      await this.answer(
+        ctx,
+        'This chat is not linked. Send /link <code> from your dashboard.',
+        true,
+      );
+      return;
+    }
+    if (verb === 'draft-yes') {
+      const result = await this.pipeline.confirmDraftProposal(
+        emailId,
+        workspaceId,
+      );
+      this.logger.log(
+        `predraft confirm ${emailId} by ${ctx.from?.id ?? 'unknown'}: ${result.outcome}`,
+      );
+      switch (result.outcome) {
+        case 'drafted':
+          await this.answer(ctx, 'Draft created — approval card sent ✅');
+          await this.clearButtons(ctx);
+          break;
+        case 'blocked':
+          await this.answer(
+            ctx,
+            'Policy now blocks this — see the notice. No draft was carded.',
+            true,
+          );
+          await this.clearButtons(ctx);
+          break;
+        case 'already':
+          await this.answer(ctx, 'Already handled.', true);
+          await this.clearButtons(ctx);
+          break;
+        case 'stale':
+          await this.answer(
+            ctx,
+            'This request went stale — flagged for review.',
+            true,
+          );
+          await this.clearButtons(ctx);
+          break;
+        case 'foreign':
+          await this.answer(ctx, 'That request is not yours.', true);
+          break;
+        default:
+          await this.answer(ctx, 'Request not found', true);
+      }
+      return;
+    }
+    const result = await this.pipeline.declineDraftProposal(
+      emailId,
+      workspaceId,
+    );
+    this.logger.log(
+      `predraft decline ${emailId} by ${ctx.from?.id ?? 'unknown'}: ${result.outcome}`,
+    );
+    switch (result.outcome) {
+      case 'declined':
+        await this.answer(ctx, 'Ignored 🚫 — no draft was created');
+        await this.clearButtons(ctx);
+        break;
+      case 'already':
+        await this.answer(ctx, 'Already handled.', true);
+        await this.clearButtons(ctx);
+        break;
+      case 'foreign':
+        await this.answer(ctx, 'That request is not yours.', true);
+        break;
+      default:
+        await this.answer(ctx, 'Request not found', true);
     }
   }
 

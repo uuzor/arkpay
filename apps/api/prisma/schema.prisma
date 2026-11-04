@@ -36,6 +36,7 @@ enum EmailStatus {
   PROCESSED
   NEEDS_REVIEW
   IGNORED
+  AWAITING_CONFIRM
 }
 
 enum ScheduleStatus {
@@ -62,6 +63,10 @@ model Email {
   subject     String?
   body        String // raw, untrusted
   status      EmailStatus @default(NEW)
+  // Validated extraction, persisted when a money request goes out for
+  // pre-draft confirm so the confirm tap reuses it instead of re-calling
+  // the model (deterministic: the user confirms exactly what was asked).
+  extractedJson Json?
   receivedAt  DateTime
   createdAt   DateTime    @default(now())
   actions     Action[]

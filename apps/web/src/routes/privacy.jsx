@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
+import { useAuth } from "@/lib/AuthContext";
 
 export const Route = createFileRoute("/privacy")({
   head: () => ({
@@ -97,6 +98,7 @@ const SECTIONS = [
 ];
 
 function PrivacyPage() {
+  const { isAuthenticated } = useAuth();
   return (
     <div className="min-h-screen bg-paper">
       <header className="border-b border-mist/60">
@@ -106,10 +108,11 @@ function PrivacyPage() {
             <span className="text-[15px] font-semibold tracking-[-0.03em] text-ink">Arkay</span>
           </Link>
           <Link
-            to="/"
+            to={isAuthenticated ? "/overview" : "/"}
             className="inline-flex items-center gap-1.5 text-[12px] font-medium text-graphite hover:text-ink"
           >
-            <ArrowLeft className="h-3.5 w-3.5" /> Back to site
+            <ArrowLeft className="h-3.5 w-3.5" />{" "}
+            {isAuthenticated ? "Back to dashboard" : "Back to site"}
           </Link>
         </div>
       </header>

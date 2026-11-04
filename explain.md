@@ -216,6 +216,12 @@ concurrency primitive — everything below builds on it. Together with the Safet
    currency if the email omits them; on mismatch vs history, add risk flags.
 4. Safety Engine pre-checks (code, not prompt): currency allow-list, amount caps,
    duplicate vs recent actions, injection-signal scan.
+4b. Pre-draft confirm (Nov 4): if Gate 1 says BLOCK → blocked notice, never an
+   ask (Flow E). Otherwise the validated extraction is persisted on the email
+   (`AWAITING_CONFIRM` + `extractedJson`) and Telegram asks "should I draft
+   this?" (Yes / Ignore). Only a Yes tap proceeds — it re-validates, re-runs
+   Gate 1 fresh, then continues at step 5. Ignore → `IGNORED`, no draft ever
+   exists. `/pending` re-sends missed asks.
 5. Decision service creates `Action(INVOICE, PENDING_APPROVAL)` with
    `actionHash`, `idempotencyKey`, `expiresAt`, writes `AuditLog(CREATED)`.
 6. Telegram card sent: payee, amount, currency, purpose, source snippet,

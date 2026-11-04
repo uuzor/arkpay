@@ -1,8 +1,10 @@
 import { Link } from "@tanstack/react-router";
 import { ArrowRight, Play } from "lucide-react";
 import ApprovalMock from "@/components/landing/ApprovalMock";
+import { useAuth } from "@/lib/AuthContext";
 
 export default function Hero() {
+  const { isAuthenticated } = useAuth();
   return (
     <section className="relative overflow-hidden border-b border-silver/60">
       <div className="pointer-events-none absolute inset-x-0 top-0 h-[520px] grid-lines opacity-40" />
@@ -28,7 +30,8 @@ export default function Hero() {
               to="/overview"
               className="inline-flex items-center gap-2 rounded-[10px] bg-ink px-6 py-3.5 text-[16px] font-semibold text-paper transition-colors hover:bg-carbon"
             >
-              Open the demo <ArrowRight className="h-4 w-4" />
+              {isAuthenticated ? "Go to dashboard" : "Open the demo"}{" "}
+              <ArrowRight className="h-4 w-4" />
             </Link>
             <a
               href="#how"

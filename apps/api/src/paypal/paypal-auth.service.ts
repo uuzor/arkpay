@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { WorkspacesService } from '../auth/workspaces.service';
 
 // Sandbox base URL verified against PayPal's REST authentication docs.
@@ -32,8 +32,22 @@ export class PaypalAuthService {
 
   constructor(private readonly workspaces: WorkspacesService) {}
 
-  /** OAuth client-credentials token + endpoint, cached until just before expiry. */
+  /**
+   * OAuth client-credentials token + endpoint, cached until just before
+   * expiry. One retry on transient failures; a genuinely unconnected
+   * workspace fails immediately instead of being retried.
+   */
   async context(workspaceId: string): Promise<PaypalContext> {
+    try {
+      return await this.contextOnce(workspaceId);
+    } catch (e) {
+      if (e instanceof BadRequestException) throw e;
+      await new Promise((r) => setTimeout(r, 700));
+      return this.contextOnce(workspaceId);
+    }
+  }
+
+  private async contextOnce(workspaceId: string): Promise<PaypalContext> {
     const creds = await this.resolveCredentials(workspaceId);
     const baseUrl = BASE_URLS[creds.mode];
     const hit = this.cached.get(workspaceId);
@@ -74,8 +88,13 @@ export class PaypalAuthService {
     try {
       return await this.workspaces.paypalCredentials(workspaceId);
     } catch (e) {
+      if (e instanceof BadRequestException) {
+        throw new BadRequestException(
+          `${e.message} — add credentials under Settings → PayPal`,
+        );
+      }
       throw new Error(
-        `PayPal is not connected for workspace ${workspaceId} — add credentials under Settings → PayPal (${e instanceof Error ? e.message : String(e)})`,
+        `PayPal credential lookup failed (${e instanceof Error ? e.message : String(e)}); please try again`,
       );
     }
   }

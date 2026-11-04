@@ -13,6 +13,8 @@
     "test:safety:e2e": "nest build && dotenv -e ../../.env -- node ../../scripts/test-safety-e2e.cjs",
     "test:scheduler": "tsc -p tsconfig.scheduler.json && node --test dist-scheduler/recurrence.spec.js",
     "test:scheduler:e2e": "nest build && dotenv -e ../../.env -- node ../../scripts/test-scheduler-e2e.cjs",
+    "test:agent": "tsc -p tsconfig.agent.json && node --test dist-agent/agent-tools.spec.js",
+    "test:predraft": "tsc -p tsconfig.predraft.json && node --test dist-predraft/predraft.spec.js",
     "test:payouts:mock": "nest build && dotenv -e ../../.env -- node ../../scripts/test-payouts-mock.cjs",
     "test:agent-chat": "nest build && dotenv -e ../../.env -- node ../../scripts/test-agent-chat.cjs",
     "test:tenancy": "nest build && dotenv -e ../../.env -- node ../../scripts/test-tenancy.cjs",

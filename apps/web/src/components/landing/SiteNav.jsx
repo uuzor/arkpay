@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Menu, X, ArrowRight } from "lucide-react";
+import { useAuth } from "@/lib/AuthContext";
 
 const LINKS = [
   { label: "Product", href: "#product" },
@@ -11,6 +12,7 @@ const LINKS = [
 
 export default function SiteNav() {
   const [open, setOpen] = useState(false);
+  const { isAuthenticated, isLoadingAuth } = useAuth();
 
   return (
     <header className="sticky top-0 z-50">
@@ -44,18 +46,34 @@ export default function SiteNav() {
           </nav>
 
           <div className="flex items-center gap-2">
-            <Link
-              to="/login"
-              className="hidden rounded-[10px] px-3 py-2 text-[14px] font-medium text-ink transition-colors hover:bg-newsprint sm:block"
-            >
-              Sign in
-            </Link>
-            <Link
-              to="/overview"
-              className="inline-flex items-center gap-1.5 rounded-[10px] bg-ink px-4 py-2 text-[14px] font-semibold text-paper transition-colors hover:bg-carbon"
-            >
-              Open the demo
-            </Link>
+            {isLoadingAuth ? (
+              <span
+                aria-hidden="true"
+                className="hidden h-9 w-[220px] animate-pulse rounded-[10px] bg-newsprint sm:block"
+              />
+            ) : isAuthenticated ? (
+              <Link
+                to="/overview"
+                className="inline-flex items-center gap-1.5 rounded-[10px] bg-ink px-4 py-2 text-[14px] font-semibold text-paper transition-colors hover:bg-carbon"
+              >
+                Go to dashboard
+              </Link>
+            ) : (
+              <>
+                <Link
+                  to="/login"
+                  className="hidden rounded-[10px] px-3 py-2 text-[14px] font-medium text-ink transition-colors hover:bg-newsprint sm:block"
+                >
+                  Sign in
+                </Link>
+                <Link
+                  to="/overview"
+                  className="inline-flex items-center gap-1.5 rounded-[10px] bg-ink px-4 py-2 text-[14px] font-semibold text-paper transition-colors hover:bg-carbon"
+                >
+                  Open the demo
+                </Link>
+              </>
+            )}
             <button
               type="button"
               aria-label="Menu"
@@ -79,9 +97,20 @@ export default function SiteNav() {
                 {l.label}
               </a>
             ))}
-            <Link to="/login" className="block py-2 text-[14px] font-medium text-graphite">
-              Sign in
-            </Link>
+            {!isLoadingAuth &&
+              (isAuthenticated ? (
+                <Link
+                  to="/overview"
+                  onClick={() => setOpen(false)}
+                  className="block py-2 text-[14px] font-medium text-graphite"
+                >
+                  Go to dashboard
+                </Link>
+              ) : (
+                <Link to="/login" className="block py-2 text-[14px] font-medium text-graphite">
+                  Sign in
+                </Link>
+              ))}
           </div>
         ) : null}
       </div>

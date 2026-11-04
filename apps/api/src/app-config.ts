@@ -23,6 +23,14 @@ export function configureApp(app: {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
+  if (
+    webOrigins.length === 0 &&
+    config.get<string>('NODE_ENV') === 'production'
+  ) {
+    throw new Error(
+      'WEB_APP_URL is not set: dashboard CORS origin unknown in production',
+    );
+  }
   app.enableCors({
     origin: webOrigins.length > 0 ? webOrigins : ['http://localhost:3000'],
     credentials: true,

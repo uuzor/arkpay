@@ -3,6 +3,8 @@ import { InjectBot } from 'nestjs-telegraf';
 import { Markup, Telegraf } from 'telegraf';
 import { AuditService } from '../audit/audit.service';
 import { parseSender } from '../contacts/sender';
+import { ExtractionSchema } from '../llm/extraction.schema';
+import { buildPredraftAsk } from '../pipeline/predraft';
 import { PrismaService } from '../prisma/prisma.service';
 import { cleanSnippet, expiryText, timeAgo } from './snippet';
 
@@ -142,6 +144,70 @@ export class TelegramService {
       chatId,
       reasons: why,
     });
+    return message.message_id;
+  }
+
+  /**
+   * Pre-draft ask for one email: "should I draft this?" No action row exists
+   * yet, so there is no audit row either — the email row (AWAITING_CONFIRM +
+   * stored extraction) is the record. Returns the message id, or 0 when the
+   * email already moved on, the stored extraction is stale, or no chat is
+   * linked (fail-closed: /pending re-sends once a chat exists).
+   */
+  async sendPredraftAsk(emailId: string): Promise<number> {
+    const email = await this.prisma.email.findUnique({
+      where: { id: emailId },
+    });
+    if (!email || email.status !== 'AWAITING_CONFIRM' || !email.extractedJson) {
+      this.logger.warn(
+        `pre-draft ask skipped for ${emailId}: not awaiting confirm`,
+      );
+      return 0;
+    }
+    const parsed = ExtractionSchema.safeParse(email.extractedJson);
+    if (!parsed.success) {
+      this.logger.warn(
+        `pre-draft ask skipped for ${emailId}: stored extraction stale`,
+      );
+      return 0;
+    }
+    // Bound to a const so the kind guard below narrows the union.
+    const extraction = parsed.data;
+    if (
+      extraction.kind !== 'INVOICE_REQUEST' &&
+      extraction.kind !== 'PAYMENT_REQUEST'
+    ) {
+      this.logger.warn(
+        `pre-draft ask skipped for ${emailId}: stored extraction is not a money request`,
+      );
+      return 0;
+    }
+    const chatId = await this.chatForWorkspace(email.workspaceId);
+    if (!chatId) {
+      this.logger.warn(
+        `no linked Telegram chat for workspace ${email.workspaceId}; pre-draft ask held (email ${emailId})`,
+      );
+      return 0;
+    }
+    const { text, keyboard } = buildPredraftAsk({
+      emailId: email.id,
+      kind: extraction.kind,
+      from: email.from,
+      subject: email.subject,
+      payeeName: extraction.payeeName ?? 'Unknown',
+      payeeEmail: extraction.payeeEmail ?? null,
+      amount: extraction.amount ?? '?',
+      currency: extraction.currency ?? 'USD',
+      purpose: extraction.purpose ?? '',
+      confidence: extraction.confidence,
+    });
+    const message = await this.bot.telegram.sendMessage(chatId, text, {
+      parse_mode: 'HTML',
+      reply_markup: keyboard,
+    });
+    this.logger.log(
+      `pre-draft ask sent for ${emailId} (message ${message.message_id})`,
+    );
     return message.message_id;
   }
 

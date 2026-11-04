@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Schedule, ScheduleRun } from '@prisma/client';
 import { AgentService } from '../agent/agent.service';
@@ -26,6 +26,9 @@ export class ScheduleHandlers {
     private readonly payroll: PayrollService,
     private readonly followups: InvoiceFollowupService,
     private readonly telegram: TelegramService,
+    // Cycle with TelegramModule (agent schedule tools need SchedulerService)
+    // is request-time safe via forwardRef on both modules.
+    @Inject(forwardRef(() => AgentService))
     private readonly agent: AgentService,
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,

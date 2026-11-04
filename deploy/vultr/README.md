@@ -52,6 +52,13 @@ restarting it — `docker compose restart api` keeps the old environment:
 docker compose -f docker-compose.prod.yml up -d --force-recreate api
 ```
 
+New variables (e.g. `WEB_APP_URL`) must reach the server too —
+`deploy.sh` never ships `.env`, so copy it explicitly first:
+
+```bash
+scp -i ~/.ssh/arkpay_vultr deploy/vultr/.env.prod root@139.84.249.48:/opt/arkpay/.env
+```
+
 ## First boot with an existing inbox
 
 The first Gmail sync backfills the newest 50 messages. The pipeline would treat

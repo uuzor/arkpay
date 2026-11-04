@@ -54,9 +54,16 @@ export class GoogleAuthService {
   }
 
   webAppUrl(): string {
-    return (
-      this.config.get<string>('WEB_APP_URL') ?? 'http://localhost:3000'
-    ).replace(/\/+$/, '');
+    const configured = this.config.get<string>('WEB_APP_URL')?.trim();
+    if (!configured) {
+      if (this.config.get<string>('NODE_ENV') === 'production') {
+        throw new Error(
+          'WEB_APP_URL is not set (post-login redirects would go to localhost)',
+        );
+      }
+      return 'http://localhost:3000';
+    }
+    return configured.replace(/\/+$/, '');
   }
 
   redirectUri(kind: 'login' | 'gmail'): string {
@@ -67,9 +74,16 @@ export class GoogleAuthService {
     )?.trim();
     if (override) return override;
     const port = process.env.API_PORT ?? 3001;
-    const base = (
-      this.config.get<string>('API_PUBLIC_URL') ?? `http://localhost:${port}`
-    ).replace(/\/+$/, '');
+    const baseRaw = this.config.get<string>('API_PUBLIC_URL')?.trim();
+    if (!baseRaw) {
+      if (this.config.get<string>('NODE_ENV') === 'production') {
+        throw new Error(
+          'API_PUBLIC_URL is not set (Google redirect_uri would point at localhost)',
+        );
+      }
+      return `http://localhost:${port}/auth/${kind === 'login' ? 'google/callback' : 'gmail/callback'}`;
+    }
+    const base = baseRaw.replace(/\/+$/, '');
     return `${base}/auth/${kind === 'login' ? 'google/callback' : 'gmail/callback'}`;
   }
 
