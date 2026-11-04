@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuthController } from './auth.controller';
+import { DemoService } from './demo.service';
 import { GoogleAuthService } from './google-auth.service';
 import { SessionService } from './session.service';
 import { WorkspacesController } from './workspaces.controller';
@@ -12,7 +13,7 @@ import { WorkspacesService } from './workspaces.service';
  */
 @Module({
   controllers: [AuthController, WorkspacesController],
-  providers: [GoogleAuthService, SessionService, WorkspacesService],
-  exports: [GoogleAuthService, SessionService, WorkspacesService],
+  providers: [GoogleAuthService, SessionService, WorkspacesService, DemoService],
+  exports: [GoogleAuthService, SessionService, WorkspacesService, DemoService],
 })
 export class AuthModule {}

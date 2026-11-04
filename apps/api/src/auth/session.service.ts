@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { createHash, randomBytes } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
-import { SESSION_TTL_MS } from './tenant.constants';
+import { DEMO_WORKSPACE_ID, SESSION_TTL_MS } from './tenant.constants';
 
 export interface RequestSession {
   user: {
@@ -10,7 +10,13 @@ export interface RequestSession {
     name: string | null;
     avatarUrl: string | null;
   };
-  workspace: { id: string; name: string; timezone: string; currency: string };
+  workspace: {
+    id: string;
+    name: string;
+    timezone: string;
+    currency: string;
+    isDemo: boolean;
+  };
 }
 
 /**
@@ -81,6 +87,7 @@ export class SessionService {
         name: row.user.workspace.name,
         timezone: row.user.workspace.timezone,
         currency: row.user.workspace.currency,
+        isDemo: row.user.workspace.id === DEMO_WORKSPACE_ID,
       },
     };
   }

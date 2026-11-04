@@ -20,6 +20,32 @@ there is no custom domain yet.
 - Product + demo plan: [idea.md](idea.md)
 - Architecture + flows + concurrency: [explain.md](explain.md)
 
+## Judge demo (no sign-in)
+
+Click **Explore the live demo** on the login page. You land in a shared
+sandbox workspace with sample data — no Google account, no email connection
+needed.
+
+What you can do without connecting anything:
+
+- **Approvals** — approve seeded invoice/payout drafts, then execute.
+  Invoices execute **live** against the PayPal sandbox (you'll get a real
+  `INV2-…` ref); payouts refuse honestly with `demo_readonly` so shared demo
+  funds never move.
+- **Audit** — trace any action end to end (created → approved → executed).
+- **Safety** — policy rules, caps, and the seeded blocked fraud payout
+  (`PAYEE_CHANGED` + urgency, no approve button).
+- **Agent chat** (right-side bar) — balances, spend, pending queue, and
+  "send invoice to …" drafts that land in Approvals. Runs on Muse Wonder.
+- **Requests / Contacts / Schedules / Payroll** — seeded rows to browse.
+- **Voice + vision** — pair Telegram via the dashboard link code, then send a
+  voice note (Muse Voice Transcribe) or receipt photo (Spark vision) to get a
+  draft + approval card.
+
+The only flow email unlocks is inbound Gmail → extraction → card; the demo
+seeds already contain email-sourced requests, and the demo video shows the
+live loop. Profile and connection editing is disabled in the shared demo.
+
 ## Layout
 
 ```

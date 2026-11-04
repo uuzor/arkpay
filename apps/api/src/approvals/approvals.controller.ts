@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  ForbiddenException,
   Get,
   Param,
   Post,
@@ -13,6 +14,7 @@ import {
   CurrentUser,
   CurrentWorkspace,
 } from '../auth/current-workspace.decorator';
+import { DEMO_WORKSPACE_ID } from '../auth/tenant.constants';
 import type { RequestSession } from '../auth/session.service';
 import { SessionAuthGuard } from '../auth/session-auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
@@ -128,6 +130,30 @@ export class ApprovalsController {
     @Param('batchId') batchId: string,
   ) {
     return this.approvals.executeBatch(batchId, workspace.id);
+  }
+
+  /**
+   * Dashboard approval — demo workspace only. Production approvals stay
+   * Telegram-tap-only; judges share one workspace (one pairing link), so the
+   * demo approves here and the same hash/version/audit machine still applies.
+   */
+  @Post(':id/approve')
+  async approve(
+    @CurrentWorkspace() workspace: RequestSession['workspace'],
+    @CurrentUser() user: RequestSession['user'],
+    @Param('id') id: string,
+  ) {
+    if (workspace.id !== DEMO_WORKSPACE_ID) {
+      throw new ForbiddenException(
+        'dashboard approvals are only available in the sandbox demo',
+      );
+    }
+    return this.decision.decideViaSession(
+      id,
+      'approve',
+      workspace.id,
+      user.id,
+    );
   }
 
   /**

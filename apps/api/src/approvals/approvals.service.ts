@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { ActionStatus, ActionType, type Action } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { AuditService } from '../audit/audit.service';
+import { DEMO_WORKSPACE_ID } from '../auth/tenant.constants';
 import { ContactsService } from '../contacts/contacts.service';
 import {
   PaypalApiError,
@@ -36,6 +37,7 @@ export type ExecuteReason =
   | 'unsupported_type'
   | 'paypal_failed'
   | 'payout_pending'
+  | 'demo_readonly'
   | 'partial';
 
 export interface ExecuteResult {
@@ -128,6 +130,25 @@ export class ApprovalsService {
         ok: false,
         reason: 'blocked',
         detail: action.safetySummary ?? 'blocked by the Payment Safety Engine',
+      };
+    }
+
+    // Judge demo is invoice-live, payout-read-only: invoices execute against
+    // the sandbox so judges see a real SENT; payouts refuse honestly instead
+    // of failing inside PayPal (the sandbox DENIEDs them anyway).
+    if (
+      action.workspaceId === DEMO_WORKSPACE_ID &&
+      action.type !== ActionType.INVOICE
+    ) {
+      await this.audit.log(actionId, 'EXECUTION_REFUSED', {
+        reason: 'demo_readonly',
+        type: action.type,
+      });
+      return {
+        ok: false,
+        reason: 'demo_readonly',
+        detail:
+          'sandbox demo: invoices execute live, payouts are read-only so shared demo funds never move',
       };
     }
 
@@ -503,6 +524,14 @@ export class ApprovalsService {
         });
       }
     };
+
+    // Batches are always payouts: the demo workspace never executes them.
+    if (members.some((m) => m.workspaceId === DEMO_WORKSPACE_ID)) {
+      const detail =
+        'sandbox demo: invoices execute live, payouts are read-only so shared demo funds never move';
+      await refuseAll('demo_readonly', detail);
+      return { ok: false, reason: 'demo_readonly', detail };
+    }
 
     for (const m of members) {
       if (

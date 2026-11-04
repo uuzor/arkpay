@@ -10,7 +10,7 @@ import { SecretBoxService } from '../common/secret-box.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { nextRunAfter } from '../scheduler/recurrence';
 import { systemSeedDefinitions } from '../scheduler/system-seeds';
-import { OWNER_WORKSPACE_ID } from './tenant.constants';
+import { DEMO_WORKSPACE_ID, OWNER_WORKSPACE_ID } from './tenant.constants';
 
 const LINK_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
@@ -235,13 +235,24 @@ export class WorkspacesService {
       gmailConnected: !!gmailRefreshToken,
       paypalConnected: !!(workspace.paypalClientId && paypalClientSecret),
       paypalMissingScopes: missingPaypalScopes(workspace.paypalScopes ?? []),
+      isDemo: workspace.id === DEMO_WORKSPACE_ID,
     };
+  }
+
+  /** The shared demo workspace keeps fixed wiring — judges browse, not rewire. */
+  private static refuseDemoEdits(workspaceId: string): void {
+    if (workspaceId === DEMO_WORKSPACE_ID) {
+      throw new BadRequestException(
+        'the sandbox demo workspace is shared — its profile and connections are fixed',
+      );
+    }
   }
 
   async updateProfile(
     workspaceId: string,
     input: { name?: string; timezone?: string; currency?: string },
   ) {
+    WorkspacesService.refuseDemoEdits(workspaceId);
     const data: { name?: string; timezone?: string; currency?: string } = {};
     if (input.name !== undefined) {
       const name = input.name.trim().replace(/\s+/g, ' ');
@@ -281,7 +292,10 @@ export class WorkspacesService {
       mode?: string;
       webhookId?: string;
     },
+    /** Server-side seeding only — never set from a controller. */
+    opts?: { viaSeed?: boolean },
   ) {
+    if (!opts?.viaSeed) WorkspacesService.refuseDemoEdits(workspaceId);
     const clientId = input.clientId?.trim();
     const clientSecret = input.clientSecret?.trim();
     const mode = (input.mode ?? 'sandbox').trim();
@@ -366,6 +380,7 @@ export class WorkspacesService {
     refreshToken: string,
     address: string,
   ): Promise<void> {
+    WorkspacesService.refuseDemoEdits(workspaceId);
     await this.prisma.workspace.update({
       where: { id: workspaceId },
       data: { gmailRefreshToken: refreshToken, gmailAddress: address },

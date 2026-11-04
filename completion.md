@@ -27,10 +27,10 @@
 - [x] Vision → Spark multimodal — **PASS end to end**: generated receipt PNG (ACME HOSTING / Invoice 1042 / 2026-10-15 / TOTAL $450.00) → `VisionService.describeImage` with `VISION_MODEL_NAME=muse-spark-1.3` → exact transcription in 5.7s. `muse-wonder-1.0` also transcribes exactly (stretch candidate). `.env`, `.env.example` updated; `deploy/vultr/.env.prod` vision var updated, Meta URL/key/model at redeploy step
 - [x] (Stretch) Wonder for agent loop — **ADOPTED**: 20/20 fixtures + 6/6 agent-chat on `muse-wonder-1.0`; split wired via new `AGENT_MODEL_NAME` (Spark 1.3 stays on extraction + vision); negative control (bogus model → gate FAIL) proves the loop reads the new var
 - [x] Redeploy Vultr API + web on Meta env — **DONE + VERIFIED**: `.env.prod` → Meta URL/key, Spark extraction/vision, Wonder agent, Voice Transcribe; added `ffmpeg` to API Dockerfile; `GET /health` ok, web 200, webhook re-registered, ffmpeg in container; in-container `VisionService` check → exact receipt transcription via `muse-spark-1.3` in 8.4s
-- [ ] Rename GitHub repo `hyperlit` → `arkpay`; confirm public + LICENSE visible logged-out; push
+- [ ] Rename GitHub repo `hyperlit` → `arkpay`; confirm public + LICENSE visible logged-out; push — **PREPPED, PUSH BLOCKED ON AUTH**: clean orphan branch `arkpay-public` committed locally (9863500, 290 files, secret-scanned: transcripts/junk excluded, `.env`/keys absent). `hyperlit` is already public but only holds the old 2025 commit — do NOT push ArkPay history to it (transcripts in old commits contain secrets). Push denied: ambient credential is `uzochukwuV` (403 on `uuzor/hyperlit`). Owner action: rename repo to `arkpay` on GitHub, then push `arkpay-public` → `main` (force-push overwrites the stale 2025 commit)
 - [ ] Claim $150 Meta credits via form (card on file) so judging (Nov 5–8) can't get throttled
-- [ ] Re-pair Telegram (`/link ARKPAY-CHQR5M`) — needed for the live demo loop
-- [ ] Write video script (~2:45) + record + upload (start early — long pole)
+- [x] Re-pair Telegram — **DONE**: `ARKPAY-BCCMPK` linked at 10:24 UTC (chat 7614171263); webhook set, 0 pending; link-check ping delivered (msg 97). User to reply `/status` to exercise the agent loop live
+- [ ] Write video script (~2:45) + record + upload (start early — long pole) — **SCRIPT DONE** (`video-script.md`, 7 beats per M2, all demo inputs verified); record + upload pending (needs re-paired Telegram + demo workspace)
 - [ ] Submission form: repo, video, contributors, "built Oct 27–Nov 4" statement
 - [ ] Final check 1h before deadline: links logged-out, demo workspace works, access stays up through Nov 8+
 
@@ -97,14 +97,14 @@ Partner onboarding, Muse Image/SAM, new features, Contributor tier, PayPal-hacka
 
 ### 2.1 Judge access (highest ROI)
 
-- [ ] Add `DEMO_MODE` env flag (server + web)
-- [ ] Backend: `POST /auth/demo` creates a session for a seeded demo workspace
-- [ ] Seed data: 4–6 pending approvals, 2 executed invoices, 1 blocked payout, audit rows, schedules, contacts
-- [ ] Demo is **read-only** (no PayPal execution) and labelled “sandbox demo”
-- [ ] Login page: “Explore the live demo” button (only when `DEMO_MODE=true`)
-- [ ] Rate-limit demo session creation; no PII
-- [ ] Verify: incognito → demo button → overview → approvals → audit → safety
-- [ ] Add demo link + instructions to README and Devpost
+- [x] Add `DEMO_MODE` env flag (server + web) — server enforces; web reads `GET /auth/mode`
+- [x] Backend: `POST /auth/demo` creates a session for a seeded demo workspace (`demo.service.ts`, idempotent seeding)
+- [x] Seed data: 5 pending approvals (3 invoice + 2 payout), 2 executed invoices, 1 blocked fraud payout, audit rows, schedules, contacts, 4 emails, Telegram link code
+- [x] Demo is **invoice-live, payout-read-only** (deviation from read-only plan, agreed with owner): invoices execute against the sandbox; payouts refuse with `demo_readonly` + audit; banner labels it “sandbox demo”
+- [x] Login page: “Explore the live demo” button (only when `DEMO_MODE=true`)
+- [x] Rate-limit demo session creation (10/hr/IP, in-memory); no PII (fixed `judge@arkpay.demo`, example.com seeds)
+- [x] Verify: demo login → isDemo session → approvals → approve → executed `INV2-4D37-GKDU-GSTG-7MQU` live in prod; payout refused `demo_readonly`; profile/PayPal edits refused; `test:demo` 8/8 ALL GREEN (incl. live `INV2-BM9Z-4PD2-GVCA-E2TW`)
+- [x] Add demo link + instructions to README (Devpost = PayPal phase, after Meta submission)
 
 ### 2.2 Demo path verification
 

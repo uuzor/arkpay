@@ -1,24 +1,37 @@
 import {
   Controller,
+  ForbiddenException,
   Get,
+  HttpException,
+  HttpStatus,
   Post,
   Query,
   Req,
   Res,
   UseGuards,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type { Request, Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   CurrentUser,
   CurrentWorkspace,
 } from './current-workspace.decorator';
+import { DemoService } from './demo.service';
 import { GoogleAuthService } from './google-auth.service';
 import { SessionService, type RequestSession } from './session.service';
 import { SessionAuthGuard } from './session-auth.guard';
 import { SESSION_COOKIE, SESSION_TTL_MS } from './tenant.constants';
 import './tenant-request';
 import { WorkspacesService } from './workspaces.service';
+
+/**
+ * Demo session minting: 10 per IP per hour. Shared process memory is fine —
+ * demo sessions are low-value and the cap only stops casual abuse.
+ */
+const DEMO_RATE_LIMIT = 10;
+const DEMO_RATE_WINDOW_MS = 60 * 60 * 1000;
+const demoHits = new Map<string, number[]>();
 
 /**
  * Google sign-in + per-workspace Gmail connect. Browser flows end in a
@@ -33,7 +46,51 @@ export class AuthController {
     private readonly sessions: SessionService,
     private readonly prisma: PrismaService,
     private readonly workspaces: WorkspacesService,
+    private readonly config: ConfigService,
+    private readonly demo: DemoService,
   ) {}
+
+  private demoEnabled(): boolean {
+    return this.config.get<string>('DEMO_MODE') === 'true';
+  }
+
+  /** Public: lets the login page show the demo button only when enabled. */
+  @Get('mode')
+  mode() {
+    return { demoEnabled: this.demoEnabled() };
+  }
+
+  /**
+   * Judge demo entry: mints a session on the shared seeded workspace. No
+   * credentials, no PII — the demo identity is fixed. Rate-limited per IP.
+   */
+  @Post('demo')
+  async demoLogin(@Req() req: Request, @Res() res: Response): Promise<void> {
+    if (!this.demoEnabled()) {
+      throw new ForbiddenException('demo mode is not enabled');
+    }
+    const ip =
+      (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
+      req.socket.remoteAddress ||
+      'unknown';
+    const now = Date.now();
+    const hits = (demoHits.get(ip) ?? []).filter(
+      (t) => now - t < DEMO_RATE_WINDOW_MS,
+    );
+    if (hits.length >= DEMO_RATE_LIMIT) {
+      throw new HttpException(
+        'too many demo sessions — try again later',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+    hits.push(now);
+    demoHits.set(ip, hits);
+    const { userId, workspaceId } = await this.demo.ensureDemoWorkspace();
+    const { token } = await this.sessions.create(userId);
+    res.setHeader('Set-Cookie', this.cookieHeader(token));
+    // Explicit 200: Nest pre-sets 201 on POST responses.
+    res.status(200).json({ ok: true, workspaceId });
+  }
 
   /**
    * Shared cookie attributes. In production the OAuth callback lands on the

@@ -16,6 +16,7 @@ import {
 } from "@/lib/actionShapes";
 import { approvalsInfinite } from "@/lib/queries";
 import { removeDraft, useAgentDrafts } from "@/lib/agentDrafts";
+import { useAuth } from "@/lib/AuthContext";
 
 export const Route = createFileRoute("/_authed/approvals")({
   head: () => ({ meta: [{ title: "Approvals · Arkay" }] }),
@@ -37,6 +38,8 @@ function describeRefusal(res) {
       return detail || "Blocked by the Payment Safety Engine.";
     case "not_retryable":
       return detail || "Not retryable — create a new action.";
+    case "demo_readonly":
+      return detail || "Sandbox demo: payouts are read-only here.";
     case "paypal_failed":
       return `PayPal refused${detail}.`;
     case "cap_exceeded":
@@ -57,6 +60,8 @@ function ApprovalsPage() {
   const [editing, setEditing] = useState(null);
   const [drawerId, setDrawerId] = useState(null);
   const [busyId, setBusyId] = useState(null);
+  const { workspace } = useAuth();
+  const isDemo = workspace?.isDemo === true;
 
   const list = useInfiniteQuery(approvalsInfinite(statusFilter, typeFilter));
   const rows = useMemo(
@@ -82,9 +87,36 @@ function ApprovalsPage() {
     setIndex(0);
   }, []);
 
+  // Demo-only: judges share one workspace (one Telegram pairing link), so
+  // pending actions approve here instead of in Telegram. Same server-side
+  // hash/version/audit machine; production stays tap-only.
+  const approveDemo = useCallback(
+    async (action) => {
+      if (!action || action.local || busyId) return;
+      setBusyId(action.id);
+      try {
+        const res = await apiJson(`/approvals/${encodeURIComponent(action.id)}/approve`, { method: "POST" });
+        if (res?.ok) {
+          toast("Approved", { description: "Now execute it to move to PayPal." });
+        } else {
+          toast("Not approved", { description: describeRefusal(res) });
+        }
+      } catch (e) {
+        toast("Not approved", { description: e?.message ?? "Request failed." });
+      } finally {
+        setBusyId(null);
+        refresh();
+      }
+    },
+    [busyId, refresh],
+  );
+
   const runPrimary = useCallback(
     async (action) => {
       if (!action || action.local || busyId) return;
+      if (isDemo && action.rawStatus === "PENDING_APPROVAL") {
+        return approveDemo(action);
+      }
       const primary = primaryFor(action);
       if (!primary) {
         toast(hintFor(action) ?? "Nothing to do here.");
@@ -111,7 +143,7 @@ function ApprovalsPage() {
         refresh();
       }
     },
-    [busyId, refresh],
+    [busyId, refresh, isDemo, approveDemo],
   );
 
   const ignoreAction = useCallback(
@@ -194,7 +226,7 @@ function ApprovalsPage() {
           <h1 className="text-[22px] font-semibold tracking-[-0.03em] text-ink">Approvals</h1>
           <p className="mt-1 text-[12.5px] text-pewter">
             {typeof totalCount === "number" ? `${totalCount} action${totalCount === 1 ? "" : "s"}` : "The money queue"} ·{" "}
-            approve in Telegram, execute here — one tap, one hash.
+            {isDemo ? "approve and execute here — sandbox demo" : "approve in Telegram, execute here — one tap, one hash"}.
           </p>
         </div>
         <div className="hidden items-center gap-2 text-[10.5px] text-steel sm:flex">
@@ -270,7 +302,11 @@ function ApprovalsPage() {
         <>
           <div className="grid gap-3 lg:grid-cols-2">
             {queue.map((request, i) => {
-              const primary = request.local ? null : primaryFor(request);
+              const primary = request.local
+                ? null
+                : isDemo && request.rawStatus === "PENDING_APPROVAL"
+                  ? { label: "Approve" }
+                  : primaryFor(request);
               return (
                 <div key={request.id} onClick={() => setIndex(i)} role="presentation">
                   <ApprovalCard
