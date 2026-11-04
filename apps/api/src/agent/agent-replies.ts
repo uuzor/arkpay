@@ -23,11 +23,12 @@ const INVOICE_NEW_RE =
   /\b(create|send|make|draft|raise|issue|new)\b[^\n]{0,80}?\binvoice\b/i;
 const INVOICE_IMPERATIVE_RE = /^\s*invoice\b/i;
 const BILL_RE = /\bbill\b/i;
-// Anything that reads, revisits, or undoes an invoice — never a new draft.
+// Anything that reads, revisits, undoes, or asks ABOUT an invoice — never a
+// new draft. The meta-question exclusions matter most for moneyless intents,
+// where there are no money hints to disambiguate ("Make me an invoice
+// template" is not a draft request).
 const INVOICE_EXCLUDE_RE =
-  /follow.?up|resend|re-send|forward|cancel|void|delete|refund|status|audit|block|dispute|remind|paid|overdue|history|list|show/i;
-const MONEY_HINT_RE =
-  /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|[$€£₦]|\b(?:usd|eur|gbp|ngn)\b|[\d,]+\.\d{1,2}|\bof\s+[\d,]+/i;
+  /follow.?up|resend|re-send|forward|cancel|void|delete|refund|status|audit|block|dispute|remind|paid|overdue|history|list|show|template|sample|example|format|tutorial|explain|how to|how do|what is|what's/i;
 const CURRENCY_SYMBOL: Record<string, string> = {
   $: 'USD',
   '€': 'EUR',
@@ -225,26 +226,12 @@ function cleanAmount(raw: string): string | undefined {
   return /^\d+(\.\d{1,2})?$/.test(cleaned) ? cleaned : undefined;
 }
 
-/**
- * Deterministic first-turn parse for NEW invoice requests ("Send invoice to
- * Ada (ada@x) for $450 for flyers"). Returns null when the message is not a
- * new-invoice intent, so the caller falls through to the model. Conservative
- * by design: mails that read, revisit, or undo an invoice never match, and
- * the payee name is left to the service merge (it owns the contact rules).
- * Mirrors the amount semantics of the service parser without importing it,
- * so this file stays dependency-free for the unit harness.
- */
-export function parseInvoiceFirstTurn(
-  message: string,
-): InvoiceFirstTurn | null {
-  const text = message.trim();
-  if (!text || text.length > 300) return null;
-  const intent =
-    INVOICE_NEW_RE.test(text) ||
-    INVOICE_IMPERATIVE_RE.test(text) ||
-    BILL_RE.test(text);
-  if (!intent || INVOICE_EXCLUDE_RE.test(text)) return null;
-  if (!MONEY_HINT_RE.test(text)) return null;
+/** Email + amount + currency extraction shared by first-turn and follow-up parsing. */
+function extractMoneyBits(text: string): {
+  payeeEmail?: string;
+  amount?: string;
+  currency?: string;
+} {
   const payeeEmail = text.match(EMAIL_LIKE)?.[0]?.toLowerCase();
   const amountMatch =
     text.match(/[$€£₦]\s*([\d,]+(?:\.\d{1,2})?)/) ??
@@ -259,33 +246,142 @@ export function parseInvoiceFirstTurn(
     const code = text.match(/\b(usd|eur|gbp|ngn)\b/i)?.[1];
     if (code) currency = code.toUpperCase();
   }
+  return {
+    ...(payeeEmail ? { payeeEmail } : {}),
+    ...(amount ? { amount } : {}),
+    ...(currency ? { currency } : {}),
+  };
+}
+
+/**
+ * Purpose from the text after the LAST "for" — only when a payee anchor AND
+ * an amount exist, so "invoice Acme" never mistakes the payee for the
+ * purpose. Trailing name clauses ("…, name is Ada") are stripped.
+ */
+function extractPurposeBit(
+  text: string,
+  anchored: boolean,
+  hasAmount: boolean,
+): string | undefined {
+  if (!anchored || !hasAmount) return undefined;
+  const segments = text.split(/\bfor\s+/i);
+  if (segments.length < 2) return undefined;
+  const candidate = segments[segments.length - 1]
+    .trim()
+    .replace(/,?\s*(?:payee\s+)?name\s+is\s+.*$/i, '')
+    .replace(/[.;!?]+$/, '');
+  if (
+    !candidate ||
+    candidate.length > 120 ||
+    /[@$€£₦]/.test(candidate) ||
+    /\b(?:usd|eur|gbp|ngn)\b/i.test(candidate) ||
+    /\d/.test(candidate)
+  ) {
+    return undefined;
+  }
+  return candidate;
+}
+
+/**
+ * Deterministic first-turn parse for NEW invoice requests ("Send invoice to
+ * Ada (ada@x) for $450 for flyers"). Returns null when the message is not a
+ * new-invoice intent, so the caller falls through to the model. Conservative
+ * by design: mails that read, revisit, undo, or ask about an invoice never
+ * match, and the payee name is left to the service merge (it owns the
+ * contact rules). Moneyless intents ("create an invoice") return {} so the
+ * caller asks the kickoff question instead of involving the model.
+ * Mirrors the amount semantics of the service parser without importing it,
+ * so this file stays dependency-free for the unit harness.
+ */
+export function parseInvoiceFirstTurn(
+  message: string,
+): InvoiceFirstTurn | null {
+  const text = message.trim();
+  if (!text || text.length > 300) return null;
+  const intent =
+    INVOICE_NEW_RE.test(text) ||
+    INVOICE_IMPERATIVE_RE.test(text) ||
+    BILL_RE.test(text);
+  // Scrub email addresses before the exclusion test so meta-words inside
+  // a domain ("example" in ada@example.com) never disqualify a request.
+  const scrubbed = text.replace(new RegExp(EMAIL_LIKE.source, 'gi'), ' ');
+  if (!intent || INVOICE_EXCLUDE_RE.test(scrubbed)) return null;
+  const { payeeEmail, amount, currency } = extractMoneyBits(text);
   // Purpose only when a payee anchor AND an amount exist, so "invoice Acme"
   // never mistakes the payee for the purpose. Takes the text after the LAST
   // "for", so "for $450 for flyers" yields "flyers", not "$450 for flyers".
-  let purpose: string | undefined;
-  if ((payeeEmail || /\bto\s+[A-Z]/i.test(text)) && amount) {
-    const segments = text.split(/\bfor\s+/i);
-    const candidate =
-      segments.length > 1
-        ? segments[segments.length - 1].trim().replace(/[.;!?]+$/, '')
-        : undefined;
-    if (
-      candidate &&
-      candidate.length <= 120 &&
-      !/[@$€£₦]/.test(candidate) &&
-      !/\b(?:usd|eur|gbp|ngn)\b/i.test(candidate) &&
-      !/\d/.test(candidate)
-    ) {
-      purpose = candidate;
-    }
-  }
-  if (!payeeEmail && !amount) return null;
+  const purpose = extractPurposeBit(
+    text,
+    !!(payeeEmail || /\bto\s+[A-Z]/i.test(text)),
+    !!amount,
+  );
   return {
     ...(payeeEmail ? { payeeEmail } : {}),
     ...(amount ? { amount } : {}),
     ...(currency ? { currency } : {}),
     ...(purpose ? { purpose } : {}),
   };
+}
+
+export interface InvoicePendingFields {
+  payeeName?: string;
+  payeeEmail?: string;
+  amount?: string;
+  currency?: string;
+  purpose?: string;
+}
+
+export interface InvoiceFollowUpMerge {
+  fields: InvoicePendingFields;
+  /** True when the merged draft has everything a draft needs. */
+  complete: boolean;
+}
+
+const NAME_IS_RE = /\b(?:payee\s+)?name\s+is\s+([^,.;!?]+)/i;
+const TO_NAME_RE =
+  /\bto\s+([A-Z][A-Za-z .'-]{1,60}?)\s+[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/;
+
+/**
+ * Merges a follow-up message into a live invoice pending draft. Accepts what
+ * parseDraftFollowUp rejects (emails, amounts) plus names and purposes, so a
+ * fully-specified reply ("bill ada@x $450 for flyers", "Its for my shoe,
+ * name is …") completes without the model. Returns null for new intents,
+ * cancellations, and messages with nothing usable — the caller falls through
+ * to the model.
+ */
+export function mergeInvoiceFollowUp(
+  pending: InvoicePendingFields,
+  message: string,
+): InvoiceFollowUpMerge | null {
+  const text = message.trim();
+  if (!text || text.length > 300) return null;
+  if (NEW_INTENT.test(text)) return null;
+  if (/^(cancel|stop|never ?mind)\b/i.test(text)) return null;
+  const { payeeEmail, amount, currency } = extractMoneyBits(text);
+  const payeeName =
+    text.match(NAME_IS_RE)?.[1]?.trim() ||
+    text.match(TO_NAME_RE)?.[1]?.trim() ||
+    undefined;
+  const purpose = extractPurposeBit(
+    text,
+    !!(payeeEmail || pending.payeeEmail || payeeName || pending.payeeName),
+    !!(amount || pending.amount),
+  );
+  if (!payeeEmail && !amount && !payeeName && !purpose) return null;
+  const fields: InvoicePendingFields = {
+    payeeName: payeeName || pending.payeeName,
+    payeeEmail: payeeEmail || pending.payeeEmail,
+    amount: amount || pending.amount,
+    currency: currency || pending.currency,
+    purpose: purpose || pending.purpose,
+  };
+  const complete = !!(
+    fields.payeeName &&
+    fields.payeeEmail &&
+    fields.amount &&
+    fields.purpose
+  );
+  return { fields, complete };
 }
 
 const NEED_LABELS: Record<string, string> = {
@@ -322,6 +418,12 @@ export function missingFieldsQuestion(
     .map((n) => NEED_LABELS[n])
     .filter((l): l is string => !!l);
   const head = bits.length > 0 ? ` — ${bits.join(', ')}` : '';
+  if (bits.length === 0) {
+    return (
+      '🧾 Sure — who should I bill, for how much, and what\'s it for? ' +
+      'Include the PayPal email to bill. Reply like: "bill ada@example.com $450 for flyers".'
+    );
+  }
   if (missing.length === 0) {
     return `🧾 Invoice draft started${head}. Which details did you mean?`;
   }

@@ -48,7 +48,7 @@ function RequestDetailPage() {
         toast("Pipeline already running", { description: "A run is in progress — try again in a moment." });
       } else {
         toast("Pipeline run finished", {
-          description: `${res?.processed ?? 0} processed · ${res?.carded ?? 0} carded · ${res?.blocked ?? 0} blocked · ${res?.ignored ?? 0} ignored · ${res?.needsReview ?? 0} need review.`,
+          description: `${res?.processed ?? 0} processed · ${res?.carded ?? 0} carded · ${res?.asked ?? 0} asked · ${res?.blocked ?? 0} blocked · ${res?.ignored ?? 0} ignored · ${res?.needsReview ?? 0} need review.`,
         });
       }
       queryClient.invalidateQueries({ queryKey: ["emails"] });
@@ -86,8 +86,39 @@ function RequestDetailPage() {
 
   const tone = emailTone(email.status);
   const actions = email.actions ?? [];
-  const extracted = actions.find((a) => a.extractedJson)?.extractedJson ?? null;
-  const canReprocess = email.status === "NEW" || email.status === "NEEDS_REVIEW";
+  const extracted =
+    actions.find((a) => a.extractedJson)?.extractedJson ??
+    email.extractedJson ??
+    null;
+  const isNew = email.status === "NEW";
+  const isReview = email.status === "NEEDS_REVIEW";
+
+  const retryEmail = async () => {
+    setPiping(true);
+    try {
+      const res = await apiJson(`/ingest/emails/${encodeURIComponent(email.id)}/retry`, {
+        method: "POST",
+      });
+      const outcome = res?.outcome ?? "unknown";
+      if (outcome === "asked") {
+        toast("Continued — draft question sent", {
+          description: "Confirm it in Telegram to proceed.",
+        });
+      } else if (outcome === "blocked") {
+        toast("Policy now blocks this email", {
+          description: "See the Telegram notice. No draft was made.",
+        });
+      } else {
+        toast(`Retry finished: ${outcome}`, { description: "Refreshing." });
+      }
+      queryClient.invalidateQueries({ queryKey: ["emails"] });
+      queryClient.invalidateQueries({ queryKey: ["approvals"] });
+    } catch (e) {
+      toast("Retry failed", { description: e?.message ?? "Could not retry this email." });
+    } finally {
+      setPiping(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -108,8 +139,13 @@ function RequestDetailPage() {
             <p className="mt-0.5 break-words text-[12px] text-pewter">
               {email.from} · received {email.receivedAt ? timeAgo(email.receivedAt) : "—"}
             </p>
+            {email.reviewReason ? (
+              <p className="mt-1.5 break-words text-[12px] font-medium text-amber-800">
+                Needs review: {email.reviewReason}
+              </p>
+            ) : null}
           </div>
-          {canReprocess ? (
+          {isNew ? (
             <button
               type="button"
               onClick={runPipeline}
@@ -117,6 +153,16 @@ function RequestDetailPage() {
               className="inline-flex items-center gap-1.5 rounded-xl bg-ink px-3.5 py-2 text-[12.5px] font-semibold text-paper disabled:opacity-50"
             >
               <Play className="h-3.5 w-3.5" /> {piping ? "Running…" : "Run pipeline"}
+            </button>
+          ) : null}
+          {isReview ? (
+            <button
+              type="button"
+              onClick={retryEmail}
+              disabled={piping}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-ink px-3.5 py-2 text-[12.5px] font-semibold text-paper disabled:opacity-50"
+            >
+              <Play className="h-3.5 w-3.5" /> {piping ? "Retrying…" : "Retry this email"}
             </button>
           ) : null}
         </div>

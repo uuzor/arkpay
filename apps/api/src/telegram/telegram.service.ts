@@ -4,7 +4,11 @@ import { Markup, Telegraf } from 'telegraf';
 import { AuditService } from '../audit/audit.service';
 import { parseSender } from '../contacts/sender';
 import { ExtractionSchema } from '../llm/extraction.schema';
-import { buildPredraftAsk } from '../pipeline/predraft';
+import {
+  buildPredraftAsk,
+  buildReviewNotice,
+  buildUnreadableNotice,
+} from '../pipeline/predraft';
 import { PrismaService } from '../prisma/prisma.service';
 import { cleanSnippet, expiryText, timeAgo } from './snippet';
 
@@ -207,6 +211,111 @@ export class TelegramService {
     });
     this.logger.log(
       `pre-draft ask sent for ${emailId} (message ${message.message_id})`,
+    );
+    return message.message_id;
+  }
+
+  /**
+   * "Needs one thing" notice for a NEEDS_REVIEW email with a stored
+   * extraction: what was understood + what is missing. The user unblocks it
+   * by replying with the PayPal email (or tapping Ignore). Returns the
+   * message id, or 0 when there is nothing to say or nowhere to say it.
+   */
+  async sendReviewNotice(emailId: string): Promise<number> {
+    const email = await this.prisma.email.findUnique({
+      where: { id: emailId },
+    });
+    if (
+      !email ||
+      email.status !== 'NEEDS_REVIEW' ||
+      !email.extractedJson ||
+      !email.reviewReason
+    ) {
+      this.logger.warn(
+        `review notice skipped for ${emailId}: not a reviewable email`,
+      );
+      return 0;
+    }
+    const parsed = ExtractionSchema.safeParse(email.extractedJson);
+    if (!parsed.success) {
+      this.logger.warn(
+        `review notice skipped for ${emailId}: stored extraction stale`,
+      );
+      return 0;
+    }
+    // Bound to a const so the kind guard below narrows the union.
+    const extraction = parsed.data;
+    if (
+      extraction.kind !== 'INVOICE_REQUEST' &&
+      extraction.kind !== 'PAYMENT_REQUEST'
+    ) {
+      this.logger.warn(
+        `review notice skipped for ${emailId}: stored extraction is not a money request`,
+      );
+      return 0;
+    }
+    const chatId = await this.chatForWorkspace(email.workspaceId);
+    if (!chatId) {
+      this.logger.warn(
+        `no linked Telegram chat for workspace ${email.workspaceId}; review notice held (email ${emailId})`,
+      );
+      return 0;
+    }
+    const { text, keyboard } = buildReviewNotice({
+      emailId: email.id,
+      kind: extraction.kind,
+      from: email.from,
+      subject: email.subject,
+      payeeName: extraction.payeeName ?? 'Unknown',
+      amount: extraction.amount ?? '?',
+      currency: extraction.currency ?? 'USD',
+      purpose: extraction.purpose ?? '',
+      confidence: extraction.confidence,
+      reason: email.reviewReason,
+    });
+    const message = await this.bot.telegram.sendMessage(chatId, text, {
+      parse_mode: 'HTML',
+      reply_markup: keyboard,
+    });
+    this.logger.log(
+      `review notice sent for ${emailId} (message ${message.message_id})`,
+    );
+    return message.message_id;
+  }
+
+  /**
+   * Dead-end notice for an email the extractor could not read: claims no
+   * facts, points at the email. Same 0-when-skipped convention.
+   */
+  async sendUnreadableNotice(emailId: string): Promise<number> {
+    const email = await this.prisma.email.findUnique({
+      where: { id: emailId },
+      select: { id: true, workspaceId: true, status: true, from: true, subject: true },
+    });
+    if (!email || email.status !== 'NEEDS_REVIEW') {
+      this.logger.warn(
+        `unreadable notice skipped for ${emailId}: not a review email`,
+      );
+      return 0;
+    }
+    const chatId = await this.chatForWorkspace(email.workspaceId);
+    if (!chatId) {
+      this.logger.warn(
+        `no linked Telegram chat for workspace ${email.workspaceId}; unreadable notice held (email ${emailId})`,
+      );
+      return 0;
+    }
+    const { text, keyboard } = buildUnreadableNotice({
+      emailId: email.id,
+      from: email.from,
+      subject: email.subject,
+    });
+    const message = await this.bot.telegram.sendMessage(chatId, text, {
+      parse_mode: 'HTML',
+      reply_markup: keyboard,
+    });
+    this.logger.log(
+      `unreadable notice sent for ${emailId} (message ${message.message_id})`,
     );
     return message.message_id;
   }

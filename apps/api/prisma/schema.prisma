@@ -67,6 +67,8 @@ model Email {
   // pre-draft confirm so the confirm tap reuses it instead of re-calling
   // the model (deterministic: the user confirms exactly what was asked).
   extractedJson Json?
+  // Display-ready reason a NEEDS_REVIEW email stopped (Telegram + dashboard).
+  reviewReason  String?
   receivedAt  DateTime
   createdAt   DateTime    @default(now())
   actions     Action[]

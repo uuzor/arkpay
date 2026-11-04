@@ -25,6 +25,7 @@ import {
   DecisionService,
   type DecisionVerb,
 } from '../approvals/decision.service';
+import { EMAIL_RE } from './drafts.service';
 import { TelegramService } from './telegram.service';
 import { TranscriptionService } from './transcription.service';
 
@@ -305,7 +306,12 @@ export class TelegramUpdate {
     if (!workspaceId) return;
     const actions = await this.decision.listPending(25, workspaceId);
     const awaiting = await this.pipeline.listAwaitingConfirm(workspaceId);
-    if (actions.length === 0 && awaiting.length === 0) {
+    const needsReview = await this.pipeline.listNeedsReview(workspaceId);
+    if (
+      actions.length === 0 &&
+      awaiting.length === 0 &&
+      needsReview.length === 0
+    ) {
       await ctx.reply('No pending approvals.');
       return;
     }
@@ -339,6 +345,15 @@ export class TelegramUpdate {
       );
       for (const email of awaiting.slice(0, 3)) {
         await this.telegram.sendPredraftAsk(email.id);
+      }
+    }
+    // Same for review notices: re-send so a missed one never strands an email.
+    if (needsReview.length > 0) {
+      await ctx.reply(
+        `${needsReview.length} email(s) needing review (reply with the missing PayPal email):`,
+      );
+      for (const email of needsReview.slice(0, 2)) {
+        await this.telegram.sendReviewNotice(email.id);
       }
     }
   }
@@ -797,6 +812,45 @@ export class TelegramUpdate {
     }
   }
 
+  @Action(/^review-no:(.+)$/)
+  async onReviewDismiss(@Ctx() ctx: CallbackContext): Promise<void> {
+    const emailId = ctx.match?.[1];
+    if (!emailId) {
+      await ctx.answerCbQuery('Malformed action');
+      return;
+    }
+    const workspaceId = await this.workspaces.resolveForTelegram(
+      ctx.from?.id ?? 0,
+    );
+    if (!workspaceId) {
+      await this.answer(
+        ctx,
+        'This chat is not linked. Send /link <code> from your dashboard.',
+        true,
+      );
+      return;
+    }
+    const result = await this.pipeline.dismissEmailReview(emailId, workspaceId);
+    this.logger.log(
+      `review dismiss ${emailId} by ${ctx.from?.id ?? 'unknown'}: ${result.outcome}`,
+    );
+    switch (result.outcome) {
+      case 'dismissed':
+        await this.answer(ctx, 'Ignored 🚫 — no draft was created');
+        await this.clearButtons(ctx);
+        break;
+      case 'already':
+        await this.answer(ctx, 'Already handled.', true);
+        await this.clearButtons(ctx);
+        break;
+      case 'foreign':
+        await this.answer(ctx, 'That request is not yours.', true);
+        break;
+      default:
+        await this.answer(ctx, 'Request not found', true);
+    }
+  }
+
   private messageText(ctx: Context): string | undefined {
     return (ctx.message as { text?: string } | undefined)?.text;
   }
@@ -804,7 +858,25 @@ export class TelegramUpdate {
   private async runAgent(ctx: Context, text: string): Promise<void> {
     if (!ctx.from) return;
     if (!(await this.requireLink(ctx))) return;
+    // Loading feedback: model turns take 10s+, and a silent chat reads as
+    // broken. Telegram shows "typing…" ~5s per call, so refresh it.
+    const tick = async (): Promise<void> => {
+      try {
+        await ctx.sendChatAction('typing');
+      } catch {
+        // Chat gone; the reply send below will fail loudly enough.
+      }
+    };
+    await tick();
+    const typing = setInterval(() => void tick(), 4000);
     try {
+      try {
+        if (await this.maybeResolveEmailField(ctx, text)) return;
+      } catch (e) {
+        this.logger.warn(
+          `email resolve failed, falling through to agent: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
       const reply = await this.agent.run(ctx.from.id, text);
       this.logger.log(
         `agent reply to ${ctx.from.id}: ${reply.document ? 'document ' : ''}${reply.text ? `${reply.text.slice(0, 60)}` : '(empty)'}`,
@@ -817,7 +889,51 @@ export class TelegramUpdate {
       await ctx.reply(
         `Something went wrong: ${e instanceof Error ? e.message : String(e)}`,
       );
+    } finally {
+      clearInterval(typing);
     }
+  }
+
+  /**
+   * Reply-to-resolve for NEEDS_REVIEW emails: a bare PayPal email answers the
+   * review notice. Skipped while an agent draft is live — the foreground
+   * conversation owns bare-email replies then.
+   */
+  private async maybeResolveEmailField(
+    ctx: Context,
+    text: string,
+  ): Promise<boolean> {
+    const userId = ctx.from?.id;
+    if (!userId || !EMAIL_RE.test(text.trim())) return false;
+    if (this.agent.hasLivePending(userId)) return false;
+    const workspaceId = await this.workspaces.resolveForTelegram(userId);
+    if (!workspaceId) return false;
+    const res = await this.pipeline.resolveMissingPayeeEmail(
+      workspaceId,
+      text.trim(),
+    );
+    if (!res.handled) return false;
+    this.logger.log(
+      `email resolve by ${userId}: ${res.emailId} → ${res.outcome}`,
+    );
+    switch (res.outcome) {
+      case 'asked':
+        await ctx.reply(
+          'Got it — the draft question is on its way. Confirm it to proceed.',
+        );
+        break;
+      case 'blocked':
+        await ctx.reply(
+          'Saved, but policy now blocks this one — see the notice. No draft was made.',
+        );
+        break;
+      default:
+        await ctx.reply(
+          'Hmm — that request already moved on. Use /pending to see open items.',
+        );
+        break;
+    }
+    return true;
   }
 
   private async sendAgentReply(

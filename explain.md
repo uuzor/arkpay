@@ -357,7 +357,15 @@ duplicate, cap and batch history from Prisma. Policy version
   reconciling by idempotency key first.
 - **LLM failures:** malformed JSON / timeout → retry once, then mark email
   `NEEDS_REVIEW` and notify ("I couldn't read this one — open it?"). No action
-  is ever created from unparsed output.
+  is ever created from unparsed output. (Nov 4: a malformed dueDate alone no
+  longer fails extraction — it is dropped and the rest proceeds.)
+- **Needs-review loop (Nov 4):** a NEEDS_REVIEW money email persists its
+  extraction + display reason and notifies Telegram ("needs one thing" with
+  what's missing, or "couldn't read" when unparseable). Replying with the
+  missing PayPal email saves it to the contact and continues immediately
+  (pre-draft ask → card); Ignore dismisses; `/pending` re-sends missed
+  notices; the dashboard request page shows the extraction + reason with a
+  retry button.
 - **Telegram down:** actions wait; approvals are pulled on recovery (webhook
   mode replays nothing, so the bot also exposes `/pending` to re-list open
   cards).

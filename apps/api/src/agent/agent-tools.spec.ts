@@ -4,6 +4,7 @@ import {
   buildScheduleCreate,
   describeActionResult,
   hasToolActivity,
+  mergeInvoiceFollowUp,
   missingFieldsQuestion,
   parseDraftFollowUp,
   parseInvoiceFirstTurn,
@@ -222,10 +223,68 @@ test('parseInvoiceFirstTurn rejects reads, revisits, undos and moneyless asks', 
   );
   assert.equal(parseInvoiceFirstTurn('Cancel invoice INV2-001'), null);
   assert.equal(parseInvoiceFirstTurn('Pay Ada $50 for flyers'), null);
-  assert.equal(parseInvoiceFirstTurn('Create an invoice'), null);
   assert.equal(parseInvoiceFirstTurn('Invoice INV2-001 status'), null);
+  assert.equal(parseInvoiceFirstTurn('Make me an invoice template'), null);
+  assert.equal(parseInvoiceFirstTurn('How do I create an invoice?'), null);
+  assert.equal(parseInvoiceFirstTurn('Show me an invoice example'), null);
   assert.equal(parseInvoiceFirstTurn(''), null);
   assert.equal(parseInvoiceFirstTurn('x'.repeat(301)), null);
+});
+
+test('parseInvoiceFirstTurn returns {} for moneyless intents (kickoff)', () => {
+  assert.deepStrictEqual(parseInvoiceFirstTurn('Create an invoice'), {});
+  assert.deepStrictEqual(parseInvoiceFirstTurn('Send an invoice'), {});
+  assert.deepStrictEqual(
+    parseInvoiceFirstTurn('Can you create an invoice for me?'),
+    {},
+  );
+});
+
+test('mergeInvoiceFollowUp completes fully-specified replies', () => {
+  assert.deepStrictEqual(
+    mergeInvoiceFollowUp(
+      { payeeEmail: 'p@x.co', amount: '200', currency: 'USD' },
+      'Its for my shoe, name is precious Ezealor',
+    ),
+    {
+      fields: {
+        payeeName: 'precious Ezealor',
+        payeeEmail: 'p@x.co',
+        amount: '200',
+        currency: 'USD',
+        purpose: 'my shoe',
+      },
+      complete: true,
+    },
+  );
+  assert.deepStrictEqual(
+    mergeInvoiceFollowUp({}, 'bill ada@example.com $450 for flyers, name is Ada Obi'),
+    {
+      fields: {
+        payeeName: 'Ada Obi',
+        payeeEmail: 'ada@example.com',
+        amount: '450',
+        currency: 'USD',
+        purpose: 'flyers',
+      },
+      complete: true,
+    },
+  );
+});
+
+test('mergeInvoiceFollowUp merges partials and rejects noise', () => {
+  const merged = mergeInvoiceFollowUp(
+    { payeeName: 'Ada', amount: '450', purpose: 'flyers' },
+    'ada@example.com',
+  );
+  assert.equal(merged?.complete, true);
+  assert.equal(merged?.fields.payeeEmail, 'ada@example.com');
+  assert.equal(
+    mergeInvoiceFollowUp({ amount: '450' }, 'Create an invoice for Bob'),
+    null,
+  );
+  assert.equal(mergeInvoiceFollowUp({}, 'cancel that'), null);
+  assert.equal(mergeInvoiceFollowUp({}, 'ok thanks!'), null);
 });
 
 test('missingFieldsQuestion asks for name + purpose with facts and a hint', () => {
@@ -248,6 +307,14 @@ test('missingFieldsQuestion asks for name + purpose with facts and a hint', () =
     }),
     '🧾 Invoice draft started — USD 450, payee Ada, for flyers. ' +
       "What's the PayPal email?",
+  );
+});
+
+test('missingFieldsQuestion asks the kickoff when nothing is known', () => {
+  assert.equal(
+    missingFieldsQuestion(['payeeName', 'amount', 'purpose', 'payeeEmail'], {}),
+    '🧾 Sure — who should I bill, for how much, and what\'s it for? ' +
+      'Include the PayPal email to bill. Reply like: "bill ada@example.com $450 for flyers".',
   );
 });
 

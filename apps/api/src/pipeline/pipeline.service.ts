@@ -4,6 +4,7 @@ import { ActionType, ContactKind, EmailStatus } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { computeActionHash } from '../approvals/action-hash';
 import { ContactsService } from '../contacts/contacts.service';
+import { EMAIL_RE } from '../telegram/drafts.service';
 import {
   ExtractionSchema,
   type ExtractionResult,
@@ -33,12 +34,37 @@ export type PredraftOutcome =
   | 'foreign'
   | 'not_found';
 
+export type RetryOutcome =
+  | 'asked'
+  | 'blocked'
+  | 'stale'
+  | 'foreign'
+  | 'not_found';
+
+export type ReviewDismissOutcome =
+  | 'dismissed'
+  | 'already'
+  | 'foreign'
+  | 'not_found';
+
 interface StoredEmail {
   id: string;
   workspaceId: string | null;
   from: string;
   subject: string | null;
   body: string;
+}
+
+/** A money extraction complete enough to ask about (schema-valid money kinds always are). */
+function isActionableExtraction(result: ExtractionResult): boolean {
+  return (
+    (result.kind === 'INVOICE_REQUEST' ||
+      result.kind === 'PAYMENT_REQUEST') &&
+    !!result.payeeName &&
+    !!result.amount &&
+    !!result.currency &&
+    !!result.purpose
+  );
 }
 
 /** Advisory Gate-1 proposal: contact + payee resolution + policy verdict, no rows written. */
@@ -163,10 +189,29 @@ export class PipelineService {
     email: StoredEmail,
   ): Promise<'carded' | 'blocked' | 'ignored' | 'review' | 'asked'> {
     const { result, status } = await this.llm.processStoredEmail(email.id);
-    if (!result || status !== EmailStatus.NEW) {
-      // Terminal statuses were already persisted by processStoredEmail.
-      return status === EmailStatus.IGNORED ? 'ignored' : 'review';
+    if (status === EmailStatus.IGNORED) return 'ignored';
+    if (status === EmailStatus.NEEDS_REVIEW) {
+      // Terminal statuses were already persisted by processStoredEmail; the
+      // pipeline adds the user-visible half: persist what was understood and
+      // say so in Telegram instead of stranding the email silently.
+      if (result && isActionableExtraction(result)) {
+        await this.saveReviewSnapshot(
+          email.id,
+          result,
+          `Low confidence (${result.confidence.toFixed(2)}) — please confirm by replying with the PayPal email`,
+        );
+      } else if (!result) {
+        try {
+          await this.telegram.sendUnreadableNotice(email.id);
+        } catch (e) {
+          this.logger.warn(
+            `unreadable notice send failed for ${email.id}: ${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
+      }
+      return 'review';
     }
+    if (!result || status !== EmailStatus.NEW) return 'review';
     // Application-level dedupe: one action per email in v1 (no schema change;
     // the tick is serial and single-process, so the window is tiny).
     const existing = await this.prisma.action.findFirst({
@@ -229,7 +274,11 @@ export class PipelineService {
     if (!payeeName || !amount || !currency || !purpose) {
       // Unreachable via the zod schema (money kinds require these), but the
       // pipeline never trusts its input — flag instead of throwing.
-      await this.flagForReview(email.id, 'extraction missing required fields');
+      await this.flagForReview(
+        email.id,
+        'Extraction is missing required fields',
+        result,
+      );
       return null;
     }
     // Someone we bill is a CLIENT; someone we pay defaults to SUPPLIER
@@ -247,7 +296,11 @@ export class PipelineService {
     // book's stored address; else a human must supply one.
     const payeePaypal = result.payeeEmail ?? contact.paypalEmail;
     if (!payeePaypal) {
-      await this.flagForReview(email.id, `no PayPal email for ${payeeName}`);
+      await this.flagForReview(
+        email.id,
+        `No PayPal email to ${type === ActionType.INVOICE ? 'bill' : 'pay'} ${payeeName}`,
+        result,
+      );
       return null;
     }
     let dueDate: Date | null = null;
@@ -535,11 +588,208 @@ export class PipelineService {
     });
   }
 
-  private async flagForReview(emailId: string, why: string): Promise<void> {
+  private async flagForReview(
+    emailId: string,
+    why: string,
+    result?: ExtractionResult,
+  ): Promise<void> {
     this.logger.warn(`email ${emailId} NEEDS_REVIEW: ${why}`);
-    await this.prisma.email.updateMany({
+    const actionable = !!result && isActionableExtraction(result);
+    const claimed = await this.prisma.email.updateMany({
       where: { id: emailId, status: EmailStatus.NEW },
-      data: { status: EmailStatus.NEEDS_REVIEW },
+      data: {
+        status: EmailStatus.NEEDS_REVIEW,
+        ...(actionable
+          ? {
+              // Round-trip strips undefined so the value is always valid JSON.
+              extractedJson: JSON.parse(JSON.stringify(result)) as object,
+              reviewReason: why,
+            }
+          : {}),
+      },
     });
+    if (claimed.count === 0 || !actionable) return;
+    try {
+      await this.telegram.sendReviewNotice(emailId);
+    } catch (e) {
+      // Durably NEEDS_REVIEW; /pending re-sends the notice.
+      this.logger.warn(
+        `review notice send failed for ${emailId}: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
+  /**
+   * Low-confidence path: the email is already NEEDS_REVIEW (marked by the
+   * extractor), so snapshot what was understood + notify. Same notice the
+   * payee-gap path sends; replying continues identically.
+   */
+  private async saveReviewSnapshot(
+    emailId: string,
+    result: ExtractionResult,
+    reason: string,
+  ): Promise<void> {
+    if (!isActionableExtraction(result)) return;
+    const claimed = await this.prisma.email.updateMany({
+      where: { id: emailId, status: EmailStatus.NEEDS_REVIEW },
+      data: {
+        extractedJson: JSON.parse(JSON.stringify(result)) as object,
+        reviewReason: reason,
+      },
+    });
+    if (claimed.count === 0) return;
+    try {
+      await this.telegram.sendReviewNotice(emailId);
+    } catch (e) {
+      this.logger.warn(
+        `review notice send failed for ${emailId}: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
+  /**
+   * Continue a NEEDS_REVIEW email from its stored extraction (no re-extract):
+   * used after the user supplies the missing piece, and by the dashboard
+   * retry button. Gate 1 runs fresh, so this can still end BLOCKED.
+   */
+  async retryEmail(
+    emailId: string,
+    workspaceId: string,
+  ): Promise<{ outcome: RetryOutcome; actionId?: string }> {
+    const email = await this.prisma.email.findUnique({
+      where: { id: emailId },
+    });
+    if (!email) return { outcome: 'not_found' };
+    if (email.workspaceId !== workspaceId) return { outcome: 'foreign' };
+    if (email.status !== EmailStatus.NEEDS_REVIEW || !email.extractedJson) {
+      return { outcome: 'stale' };
+    }
+    const parsed = ExtractionSchema.safeParse(email.extractedJson);
+    if (!parsed.success || !isActionableExtraction(parsed.data)) {
+      return { outcome: 'stale' };
+    }
+    const flipped = await this.prisma.email.updateMany({
+      where: { id: emailId, status: EmailStatus.NEEDS_REVIEW },
+      data: { status: EmailStatus.NEW },
+    });
+    if (flipped.count === 0) return { outcome: 'stale' };
+    const stored: StoredEmail = {
+      id: email.id,
+      workspaceId: email.workspaceId,
+      from: email.from,
+      subject: email.subject,
+      body: email.body,
+    };
+    const proposal = await this.resolveProposal(stored, parsed.data);
+    if (!proposal) return { outcome: 'stale' };
+    if (proposal.verdict.verdict === 'BLOCK') {
+      const created = await this.createActionFromExtraction(
+        stored,
+        parsed.data,
+        proposal,
+      );
+      return created
+        ? { outcome: 'blocked', actionId: created.id }
+        : { outcome: 'stale' };
+    }
+    await this.askPredraftConfirm(stored, parsed.data, proposal);
+    return { outcome: 'asked' };
+  }
+
+  /**
+   * Telegram reply-to-resolve: a bare PayPal email answers the freshest
+   * NEEDS_REVIEW email (24h window) that has a stored extraction. Sets the
+   * contact's missing address, then continues the flow immediately.
+   */
+  async resolveMissingPayeeEmail(
+    workspaceId: string,
+    payeeEmail: string,
+  ): Promise<{
+    handled: boolean;
+    outcome?: RetryOutcome;
+    emailId?: string;
+  }> {
+    const normalized = payeeEmail.trim().toLowerCase();
+    if (!EMAIL_RE.test(normalized)) return { handled: false };
+    const candidates = await this.prisma.email.findMany({
+      where: {
+        workspaceId,
+        status: EmailStatus.NEEDS_REVIEW,
+        receivedAt: { gte: new Date(Date.now() - 24 * 3600 * 1000) },
+      },
+      orderBy: { receivedAt: 'desc' },
+      take: 5,
+    });
+    const email = candidates.find((e) => e.extractedJson != null);
+    if (!email) return { handled: false };
+    const parsed = ExtractionSchema.safeParse(email.extractedJson);
+    if (!parsed.success || !isActionableExtraction(parsed.data)) {
+      return { handled: false };
+    }
+    const kind =
+      parsed.data.kind === 'INVOICE_REQUEST'
+        ? ContactKind.CLIENT
+        : ContactKind.SUPPLIER;
+    const contact = await this.contacts.findOrCreate(
+      { name: parsed.data.payeeName, kind },
+      workspaceId,
+    );
+    // Set-if-null only: never clobber an address the book already holds.
+    if (!contact.paypalEmail) {
+      await this.prisma.contact.update({
+        where: { id: contact.id },
+        data: { paypalEmail: normalized },
+      });
+    }
+    const retried = await this.retryEmail(email.id, workspaceId);
+    return { handled: true, outcome: retried.outcome, emailId: email.id };
+  }
+
+  /**
+   * Ignore button on review/ask messages: terminal for AWAITING_CONFIRM and
+   * NEEDS_REVIEW alike. No draft ever exists down this path.
+   */
+  async dismissEmailReview(
+    emailId: string,
+    workspaceId: string,
+  ): Promise<{ outcome: ReviewDismissOutcome }> {
+    const email = await this.prisma.email.findUnique({
+      where: { id: emailId },
+      select: { workspaceId: true, status: true },
+    });
+    if (!email) return { outcome: 'not_found' };
+    if (email.workspaceId !== workspaceId) return { outcome: 'foreign' };
+    if (
+      email.status !== EmailStatus.AWAITING_CONFIRM &&
+      email.status !== EmailStatus.NEEDS_REVIEW
+    ) {
+      return { outcome: 'already' };
+    }
+    const dismissed = await this.prisma.email.updateMany({
+      where: {
+        id: emailId,
+        status: {
+          in: [EmailStatus.AWAITING_CONFIRM, EmailStatus.NEEDS_REVIEW],
+        },
+      },
+      data: { status: EmailStatus.IGNORED },
+    });
+    return { outcome: dismissed.count > 0 ? 'dismissed' : 'already' };
+  }
+
+  /** NEEDS_REVIEW emails with a stored extraction, for /pending re-surface. */
+  async listNeedsReview(
+    workspaceId: string,
+    take = 10,
+  ): Promise<Array<{ id: string; from: string; subject: string | null }>> {
+    const rows = await this.prisma.email.findMany({
+      where: { workspaceId, status: EmailStatus.NEEDS_REVIEW },
+      orderBy: { receivedAt: 'desc' },
+      take: Math.min(Math.max(take, 1), 25),
+      select: { id: true, from: true, subject: true, extractedJson: true },
+    });
+    return rows
+      .filter((r) => r.extractedJson != null)
+      .map(({ id, from, subject }) => ({ id, from, subject }));
   }
 }

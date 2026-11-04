@@ -12,6 +12,7 @@ import { EmailStatus, Prisma } from '@prisma/client';
 import { CurrentWorkspace } from '../auth/current-workspace.decorator';
 import type { RequestSession } from '../auth/session.service';
 import { SessionAuthGuard } from '../auth/session-auth.guard';
+import { PipelineService } from '../pipeline/pipeline.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { GmailIngestService } from './gmail-ingest.service';
 
@@ -21,6 +22,7 @@ export class IngestController {
   constructor(
     private readonly ingest: GmailIngestService,
     private readonly prisma: PrismaService,
+    private readonly pipeline: PipelineService,
   ) {}
 
   /**
@@ -150,5 +152,17 @@ export class IngestController {
     });
     if (!email) throw new NotFoundException(`email ${id} not found`);
     return email;
+  }
+
+  /**
+   * Continue a NEEDS_REVIEW email from its stored extraction (no re-extract):
+   * the dashboard "Retry this email" button. Runs Gate 1 fresh.
+   */
+  @Post('emails/:id/retry')
+  async retryEmail(
+    @CurrentWorkspace() workspace: RequestSession['workspace'],
+    @Param('id') id: string,
+  ) {
+    return this.pipeline.retryEmail(id, workspace.id);
   }
 }

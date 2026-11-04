@@ -19,10 +19,12 @@ import {
   buildScheduleCreate,
   describeActionResult,
   hasToolActivity,
+  mergeInvoiceFollowUp,
   missingFieldsQuestion,
   parseDraftFollowUp,
   parseInvoiceFirstTurn,
   summarizeEmptyResult,
+  type InvoicePendingFields,
 } from './agent-replies';
 import {
   AMOUNT_RE,
@@ -251,6 +253,16 @@ export class AgentService {
     this.pendingDrafts.delete(userId);
   }
 
+  /** True while the user has a live invoice or payout draft awaiting details. */
+  hasLivePending(userId: number): boolean {
+    const live = (p?: { expiresAt: number }) =>
+      !!p && p.expiresAt > Date.now();
+    return (
+      live(this.pendingDrafts.get(userId)) ||
+      live(this.pendingPayouts.get(userId))
+    );
+  }
+
   async run(
     userId: number,
     text: string,
@@ -417,20 +429,59 @@ export class AgentService {
       );
       return { text: this.invoiceResultText(result) };
     }
-    // Name/purpose follow-ups ("Its for my shoe, name is precious Ezealor"):
-    // complete deterministically instead of trusting the model to re-call.
-    // Only when exactly one draft is live; otherwise the model disambiguates.
+    // Follow-up merge ("Its for my shoe, name is …", "bill ada@x $450 for
+    // flyers", bare emails/amounts): merge deterministically instead of
+    // trusting the model to re-call. Only when exactly one invoice draft is
+    // live; otherwise the model disambiguates.
+    let livePayout = options.readOnly
+      ? undefined
+      : this.pendingPayouts.get(userId);
+    if (livePayout && livePayout.expiresAt < Date.now()) {
+      this.pendingPayouts.delete(userId);
+      livePayout = undefined;
+    }
+    if (pending && !livePayout) {
+      const pendingFields: InvoicePendingFields = {
+        payeeName: pending.payeeName,
+        payeeEmail: pending.payeeEmail,
+        amount: pending.amount,
+        currency: pending.currency,
+        purpose: pending.purpose,
+      };
+      const merged = mergeInvoiceFollowUp(pendingFields, message);
+      if (merged) {
+        const result = await this.createInvoiceDraft(
+          { ...merged.fields, instruction: message },
+          userId,
+          options.origin,
+          options.workspaceId,
+        );
+        if (result.ok || ('blocked' in result && result.blocked)) {
+          return { text: this.invoiceResultText(result) };
+        }
+        // Still partial: the pending draft was refreshed by the tool, so ask
+        // directly instead of another model round-trip.
+        const refreshed = this.pendingDrafts.get(userId);
+        const needs =
+          'needs' in result && Array.isArray(result.needs)
+            ? (result.needs as string[])
+            : [];
+        return {
+          text: missingFieldsQuestion(needs, {
+            payeeName: refreshed?.payeeName,
+            payeeEmail: refreshed?.payeeEmail,
+            amount: refreshed?.amount,
+            currency: refreshed?.currency,
+            purpose: refreshed?.purpose,
+          }),
+        };
+      }
+    }
+    // Name/purpose fragments the merge rejects (new intents never reach
+    // here): legacy parse, kept for the payout half below.
     const followUp = parseDraftFollowUp(message);
     if (followUp && (followUp.payeeName || followUp.purpose)) {
-      let livePayout = options.readOnly
-        ? undefined
-        : this.pendingPayouts.get(userId);
-      if (livePayout && livePayout.expiresAt < Date.now()) {
-        this.pendingPayouts.delete(userId);
-        livePayout = undefined;
-      }
-      const liveCount =
-        (pending ? 1 : 0) + (livePayout ? 1 : 0);
+      const liveCount = (pending ? 1 : 0) + (livePayout ? 1 : 0);
       if (liveCount === 1 && pending) {
         const result = await this.createInvoiceDraft(
           {
@@ -487,12 +538,7 @@ export class AgentService {
     options: AgentRunOptions & { workspaceId: string },
   ): Promise<(AgentReply & { actionId?: string }) | null> {
     if (options.readOnly) return null;
-    const live = (p?: { expiresAt: number }) =>
-      !!p && p.expiresAt > Date.now();
-    if (
-      live(this.pendingDrafts.get(userId)) ||
-      live(this.pendingPayouts.get(userId))
-    ) {
+    if (this.hasLivePending(userId)) {
       return null;
     }
     const firstTurn = parseInvoiceFirstTurn(message);

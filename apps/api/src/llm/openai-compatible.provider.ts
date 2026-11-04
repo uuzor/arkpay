@@ -211,6 +211,20 @@ export class OpenAiCompatibleProvider implements LlmProvider {
     }
     const validated = ExtractionSchema.safeParse(json);
     if (!validated.success) {
+      // A malformed dueDate must not sink an otherwise good extraction: it
+      // is the only informational field, so drop it and re-validate once.
+      const issues = validated.error.issues;
+      if (
+        issues.length > 0 &&
+        issues.every((i) => i.path.length === 1 && i.path[0] === 'dueDate') &&
+        json !== null &&
+        typeof json === 'object'
+      ) {
+        const rest: Record<string, unknown> = { ...json };
+        delete rest.dueDate;
+        const retried = ExtractionSchema.safeParse(rest);
+        if (retried.success) return { ok: true, value: retried.data };
+      }
       const first = validated.error.issues[0];
       const path = first.path.join('.') || '(root)';
       return { ok: false, error: `${path}: ${first.message}` };
