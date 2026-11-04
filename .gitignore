@@ -1,0 +1,26 @@
+node_modules/
+dist/
+dist-safety/
+dist-scheduler/
+build/
+.next/
+out/
+coverage/
+.env
+.env.local
+*.log
+*.tsbuildinfo
+.DS_Store
+.env.prod
+.env.production
+
+# Deployment SSH keys — kept in the workspace so they survive container resets.
+# Never commit private keys.
+.ssh/
+
+# Hackathon submission hygiene — never publish these.
+conversation-*.txt
+answer.txt
+apps/*.zip
+meta.md
+opencode.md

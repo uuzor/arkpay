@@ -1,0 +1,158 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 0%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 0%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 0%;
+    --primary: 21 100% 50%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 20% 96%;
+    --secondary-foreground: 0 0% 0%;
+    --muted: 240 20% 96%;
+    --muted-foreground: 220 5% 40%;
+    --accent: 240 20% 96%;
+    --accent-foreground: 0 0% 0%;
+    --destructive: 0 72% 45%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 240 8% 88%;
+    --input: 240 8% 84%;
+    --ring: 21 100% 50%;
+
+    --chart-1: 21 100% 50%;
+    --chart-2: 220 5% 40%;
+    --chart-3: 240 8% 75%;
+    --chart-4: 160 40% 40%;
+    --chart-5: 43 74% 55%;
+
+    --radius: 0.75rem;
+
+    --font-heading: "Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --font-body: "Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --font-display: "Manrope", ui-sans-serif, system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 220 5% 40%;
+    --sidebar-primary: 0 0% 0%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 20% 96%;
+    --sidebar-accent-foreground: 0 0% 0%;
+    --sidebar-border: 240 8% 90%;
+    --sidebar-ring: 21 100% 50%;
+  }
+
+  .dark {
+    --background: 213 100% 3%;
+    --foreground: 0 0% 98%;
+    --card: 210 14% 11%;
+    --card-foreground: 0 0% 98%;
+    --popover: 210 14% 11%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 21 100% 50%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 10% 16%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 210 10% 16%;
+    --muted-foreground: 233 7% 65%;
+    --accent: 210 10% 16%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62% 40%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 210 10% 20%;
+    --input: 210 10% 20%;
+    --ring: 21 100% 50%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground font-body antialiased;
+    letter-spacing: -0.011em;
+  }
+
+  ::selection {
+    background: #ff5900;
+    color: #ffffff;
+  }
+}
+
+@layer utilities {
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .tight {
+    letter-spacing: -0.03em;
+  }
+
+  .grid-lines {
+    background-image: linear-gradient(to right, rgba(185, 187, 198, 0.35) 1px, transparent 1px);
+    background-size: 25% 100%;
+  }
+}
+
+.md-prose > p + p,
+.md-prose > ul,
+.md-prose > ol,
+.md-prose > blockquote {
+  margin-top: 0.4rem;
+}
+
+.md-prose ul {
+  list-style: disc;
+  padding-left: 1.1rem;
+}
+
+.md-prose ol {
+  list-style: decimal;
+  padding-left: 1.1rem;
+}
+
+.md-prose li + li {
+  margin-top: 0.2rem;
+}
+
+.md-prose li {
+  color: #60646c;
+}
+
+.md-prose blockquote {
+  border-left: 2px solid #e3e1da;
+  padding-left: 0.6rem;
+  color: #6f737b;
+  font-size: 11px;
+}
+
+.md-code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: #f3f3f7;
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

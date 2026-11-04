@@ -1,0 +1,331 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ContactKind {
+  CLIENT
+  SUPPLIER
+  STAFF
+}
+
+enum ActionType {
+  INVOICE
+  PAYOUT_SINGLE
+  PAYOUT_BATCH
+}
+
+enum ActionStatus {
+  PENDING_APPROVAL
+  APPROVED
+  EXECUTING
+  EXECUTED
+  FAILED
+  BLOCKED
+  IGNORED
+  EXPIRED
+  SUPERSEDED
+}
+
+enum EmailStatus {
+  NEW
+  PROCESSED
+  NEEDS_REVIEW
+  IGNORED
+}
+
+enum ScheduleStatus {
+  ACTIVE
+  PAUSED
+  DONE
+  CANCELLED
+}
+
+enum ScheduleRunStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+  SKIPPED
+}
+
+model Email {
+  id          String      @id @default(cuid())
+  workspaceId String // tenant
+  workspace   Workspace   @relation(fields: [workspaceId], references: [id])
+  gmailId     String
+  threadId    String?
+  from        String
+  subject     String?
+  body        String // raw, untrusted
+  status      EmailStatus @default(NEW)
+  receivedAt  DateTime
+  createdAt   DateTime    @default(now())
+  actions     Action[]
+
+  @@unique([workspaceId, gmailId]) // dedupe: same Gmail message never ingested twice per mailbox
+  @@index([status])
+  @@index([workspaceId])
+}
+
+// Gmail history cursor. One row per mailbox (GMAIL_ADDRESS). The checkpoint is
+// written in the same transaction as the Email inserts, so a crash can never
+// advance the cursor past rows that were not stored.
+// Persisted Telegram conversation history for the AI agent. Tool calls are
+// not persisted; only the user's words and the assistant's final reply.
+model AgentMessage {
+  id          String    @id @default(cuid())
+  workspaceId String // tenant
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  userId      String
+  role        String // "user" | "assistant"
+  content     String
+  createdAt   DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@index([workspaceId])
+}
+
+model GmailCheckpoint {
+  mailbox     String    @id
+  workspaceId String // owning tenant; mailbox stays globally unique (one address, one cursor)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  historyId   String
+  lastSyncAt  DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([workspaceId])
+}
+
+model Contact {
+  id          String      @id @default(cuid())
+  workspaceId String // tenant
+  workspace   Workspace   @relation(fields: [workspaceId], references: [id])
+  name        String
+  paypalEmail String? // PayPal email/ID only, never raw bank details
+  kind        ContactKind
+  usualAmount Decimal?
+  currency    String      @default("USD")
+  firstSeenAt DateTime    @default(now())
+  lastPaidAt  DateTime?
+  payCount    Int         @default(0)
+  actions     Action[]
+
+  @@unique([workspaceId, name, kind])
+  @@index([paypalEmail])
+  @@index([workspaceId])
+}
+
+model Action {
+  id             String       @id @default(cuid())
+  workspaceId    String // tenant
+  workspace      Workspace    @relation(fields: [workspaceId], references: [id])
+  type           ActionType
+  status         ActionStatus @default(PENDING_APPROVAL)
+  emailId        String?
+  email          Email?       @relation(fields: [emailId], references: [id])
+  contactId      String?
+  contact        Contact?     @relation(fields: [contactId], references: [id])
+  payeeName      String
+  payeePaypal    String
+  amount         Decimal
+  currency       String
+  purpose        String
+  dueDate        DateTime?
+  extractedJson  Json // what the model proposed
+  riskFlags      String[] // DUPLICATE, PAYEE_CHANGED, AMOUNT_ANOMALY, INJECTION_SIGNAL, NEW_PAYEE, URGENCY ...
+  policyVersion  String? // Safety Engine version that judged this action
+  policyVerdict  String? // ALLOW | NEEDS_CONFIRMATION | BLOCK
+  safetySummary  String? // human-readable reasons, shown on the dashboard
+  confidence     Float?
+  actionHash     String // sha256(payee|amount|currency|purpose|idempotencyKey)
+  idempotencyKey String       @unique // one key per action; PayPal calls carry it
+  batchId        String? // groups PAYOUT_BATCH members
+  paypalRef      String? // invoice ID / payout batch ID once executed
+  approvedBy     String? // Telegram user id
+  approvedAt     DateTime?
+  expiresAt      DateTime // approvals die young (~15 min for pay, longer for invoice)
+  version        Int          @default(1) // optimistic lock; edits bump version + new hash
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  audit          AuditLog[]
+
+  @@index([status])
+  @@index([batchId])
+  @@index([status, createdAt])
+  @@index([workspaceId])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actionId  String
+  action    Action   @relation(fields: [actionId], references: [id])
+  event     String // CREATED | CARD_SENT | APPROVED | EDITED | BLOCKED | EXECUTED | WEBHOOK_* | ...
+  detail    Json?
+  createdAt DateTime @default(now())
+
+  @@index([actionId])
+}
+
+model ProcessedWebhook {
+  eventId     String   @id // PayPal webhook event id; insert-or-ignore dedupes
+  type        String
+  workspaceId String? // attribution only; event ids are PayPal-global, null = unattributed
+  createdAt   DateTime @default(now())
+
+  @@index([workspaceId])
+}
+
+model PayrollRun {
+  id            String       @id @default(cuid())
+  workspaceId   String // tenant
+  workspace     Workspace    @relation(fields: [workspaceId], references: [id])
+  period        String // "2026-11" — unique per workspace prevents double-preparing a month
+  status        ActionStatus @default(PENDING_APPROVAL)
+  batchId       String       @unique
+  totalAmount   Decimal
+  currency      String
+  preparedAt    DateTime     @default(now())
+  preparedBy    String       @default("scheduler") // scheduler | manual | api
+  note          String?
+  skippedReason String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@unique([workspaceId, period])
+  @@index([status, createdAt])
+  @@index([workspaceId])
+}
+
+/**
+ * A generic scheduled job. Title/detail are for humans; kind/payload tell the
+ * runner which registered handler to call. nextRunAt is materialized in UTC
+ * so a missed tick can be caught up after a restart.
+ */
+model Schedule {
+  id                  String         @id @default(cuid())
+  workspaceId         String // tenant
+  workspace           Workspace      @relation(fields: [workspaceId], references: [id])
+  title               String
+  detail              String
+  kind                String // PAYROLL_PREPARE | INVOICE_REMINDERS | NOTIFY | AGENT_TASK
+  payload             Json           @default("{}")
+  status              ScheduleStatus @default(ACTIVE)
+  trigger             String // ONCE | INTERVAL | CRON
+  runAt               DateTime?
+  intervalMinutes     Int?
+  cron                String?
+  timezone            String         @default("UTC")
+  nextRunAt           DateTime?
+  lastRunAt           DateTime?
+  misfirePolicy       String         @default("run_once") // run_once | skip
+  misfireGraceMinutes Int            @default(120)
+  systemKey           String? // seeded defaults; null for user-created
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  runs                ScheduleRun[]
+
+  @@unique([workspaceId, systemKey])
+  @@index([status, nextRunAt])
+  @@index([kind])
+  @@index([workspaceId])
+}
+
+model SafetyPolicy {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  version     Int // 1, 2, 3… per workspace; the latest row is the effective policy
+  config      Json // partial SafetyPolicyConfig; missing keys fall back to global defaults
+  createdAt   DateTime  @default(now())
+
+  @@unique([workspaceId, version])
+  @@index([workspaceId])
+}
+
+model ScheduleRun {
+  id             String            @id @default(cuid())
+  scheduleId     String
+  schedule       Schedule          @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  scheduledFor   DateTime
+  startedAt      DateTime          @default(now())
+  finishedAt     DateTime?
+  status         ScheduleRunStatus @default(RUNNING)
+  trigger        String            @default("scheduled") // scheduled | manual
+  idempotencyKey String            @unique
+  result         Json?
+  error          String?
+  createdAt      DateTime          @default(now())
+
+  @@unique([scheduleId, scheduledFor])
+  @@index([scheduleId, startedAt])
+  @@index([status, startedAt])
+}
+
+// Phase 10 identity: one Google user owns exactly one workspace
+// (personal-only; the Workspace model stays explicit so orgs remain possible).
+model User {
+  id        String     @id @default(cuid())
+  googleSub String     @unique
+  email     String
+  name      String?
+  avatarUrl String?
+  createdAt DateTime   @default(now())
+  workspace Workspace?
+  sessions  Session[]
+}
+
+model Workspace {
+  id                 String            @id @default(cuid())
+  ownerId            String?           @unique // null = legacy owner workspace awaiting adoption
+  owner              User?             @relation(fields: [ownerId], references: [id])
+  name               String            @default("My workspace")
+  timezone           String            @default("UTC")
+  currency           String            @default("USD")
+  gmailAddress       String?
+  gmailRefreshToken  String? // per-workspace Gmail OAuth; null = not connected
+  paypalClientId     String?
+  paypalClientSecret String? // plaintext MVP — encrypt before public launch
+  paypalMode         String            @default("sandbox")
+  paypalWebhookId    String? // this app's webhook subscription id; null = shared env webhook
+  paypalAccountId    String? // OIDC subject from userinfo; client-credentials tokens expose no email
+  paypalAppId        String? // PayPal app that issued the token (APP-...)
+  paypalScopes       String[] @default([]) // scopes granted to the app's client-credentials token
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  telegramLink       TelegramLink?
+  emails             Email[]
+  agentMessages      AgentMessage[]
+  checkpoints        GmailCheckpoint[]
+  contacts           Contact[]
+  actions            Action[]
+  payrollRuns        PayrollRun[]
+  schedules          Schedule[]
+  safetyPolicies     SafetyPolicy[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique // sha256 of the opaque cookie token
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// One shared Telegram bot; each workspace pairs its own approver chat via
+// a short code (dashboard shows it, owner sends /link <code> to the bot).
+model TelegramLink {
+  id          String    @id @default(cuid())
+  workspaceId String    @unique
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  telegramId  String?   @unique // set once /link <code> is tapped
+  linkCode    String    @unique
+  linkedAt    DateTime?
+  createdAt   DateTime  @default(now())
+}

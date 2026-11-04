@@ -1,0 +1,12 @@
+node_modules
+.git
+.local
+.cache
+.config
+*.log
+conversation-*.txt
+.env
+.env.*
+apps/api/dist
+apps/web/.next
+apps/web/out
