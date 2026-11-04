@@ -11,6 +11,8 @@ import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   DEFAULT_SAFETY_POLICY,
+  NEVER_RULES,
+  POLICY_MATRIX,
   POLICY_RULES,
   SAFETY_POLICY_VERSION,
   evaluateSafety,
@@ -148,6 +150,8 @@ export class SafetyService {
       overridden: effective.overrideVersion !== null,
       config: effective.config,
       rules: POLICY_RULES,
+      matrix: POLICY_MATRIX,
+      neverRules: NEVER_RULES,
     };
   }
 
@@ -395,6 +399,9 @@ export class SafetyService {
         gate,
         policyVersion: verdict.policyVersion,
         verdict: verdict.verdict,
+        ruleIds: verdict.ruleIds,
+        payeeStatus: verdict.payeeStatus,
+        extraConfirmationRequired: verdict.extraConfirmationRequired,
         flags: verdict.flags,
         reasons: verdict.reasons,
         summary: verdict.summary,
@@ -443,6 +450,7 @@ export class SafetyService {
           gate,
           policyVersion: verdict.policyVersion,
           verdict: verdict.verdict,
+          ruleIds: verdict.ruleIds,
           flags: verdict.flags,
           reasons: verdict.reasons,
           summary: verdict.summary,

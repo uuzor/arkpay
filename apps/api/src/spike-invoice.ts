@@ -53,7 +53,20 @@ async function main() {
       `sent: id=${draft.id} — confirm in the sandbox dashboard (recipient: ${to})`,
     );
   } finally {
-    await app.close();
+    // The bot is never launched in one-shot CLI contexts (launchOptions:
+    // false), but nestjs-telegraf's shutdown hook calls bot.stop() anyway
+    // and telegraf throws "Bot is not running!". That is shutdown noise —
+    // swallow it, but never over a real failure from the body above.
+    try {
+      await app.close();
+    } catch (closeErr) {
+      const msg = closeErr instanceof Error ? closeErr.message : String(closeErr);
+      if (/Bot is not running/i.test(msg)) {
+        console.log(`(ignored shutdown noise: ${msg})`);
+      } else {
+        throw closeErr;
+      }
+    }
   }
 }
 

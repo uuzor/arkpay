@@ -12,7 +12,7 @@
  * history.
  */
 
-export const SAFETY_POLICY_VERSION = 'arkpay-policy-2026-11-03';
+export const SAFETY_POLICY_VERSION = 'arkpay-policy-2026-11-04';
 
 export type SafetyActionType = 'INVOICE' | 'PAYOUT_SINGLE' | 'PAYOUT_BATCH';
 
@@ -118,8 +118,142 @@ export const DEFAULT_SAFETY_POLICY: SafetyPolicyConfig = {
   dueDateMaxDays: 365,
 };
 
+/**
+ * §6 payee axis. Derived from the same flags the verdict reports, so the
+ * approval card and the execution gate can never disagree about it.
+ */
+export type PayeeStatus = 'KNOWN' | 'NEW' | 'CHANGED';
+
+/** §6 cell outcomes. */
+export type PolicyCellOutcome =
+  | 'ALLOW_UNDER_LIMIT'
+  | 'APPROVE'
+  | 'APPROVE_EXTRA_CONFIRMATION'
+  | 'BLOCK_MANUAL_OVERRIDE_ONLY';
+
+export interface PolicyMatrixCell {
+  ruleId: string;
+  outcome: PolicyCellOutcome;
+  note: string;
+}
+
+/**
+ * idea.md §6 execution policy: rows are action types, columns are payee
+ * status. Data, not prose — every verdict cites the cell that decided it.
+ * Caps and invalid fields may only make a decision stricter, never looser.
+ */
+export const POLICY_MATRIX: Readonly<
+  Record<SafetyActionType, Record<PayeeStatus, PolicyMatrixCell>>
+> = Object.freeze({
+  INVOICE: Object.freeze({
+    KNOWN: Object.freeze({
+      ruleId: 'M-INVOICE-KNOWN',
+      outcome: 'ALLOW_UNDER_LIMIT',
+      note: 'Allow under the user limit, else manual approval.',
+    }),
+    NEW: Object.freeze({
+      ruleId: 'M-INVOICE-NEW',
+      outcome: 'APPROVE',
+      note: 'Manual approval for a first-time payee.',
+    }),
+    CHANGED: Object.freeze({
+      ruleId: 'M-INVOICE-CHANGED',
+      outcome: 'APPROVE',
+      note: 'Manual approval, and the card shows what changed.',
+    }),
+  }),
+  PAYOUT_SINGLE: Object.freeze({
+    KNOWN: Object.freeze({
+      ruleId: 'M-PAYOUT-SINGLE-KNOWN',
+      outcome: 'ALLOW_UNDER_LIMIT',
+      note: 'Allow under the user limit and daily caps, else manual approval.',
+    }),
+    NEW: Object.freeze({
+      ruleId: 'M-PAYOUT-SINGLE-NEW',
+      outcome: 'APPROVE_EXTRA_CONFIRMATION',
+      note: 'Approve with extra confirmation: re-enter the amount.',
+    }),
+    CHANGED: Object.freeze({
+      ruleId: 'M-PAYOUT-SINGLE-CHANGED',
+      outcome: 'BLOCK_MANUAL_OVERRIDE_ONLY',
+      note: 'Blocked. Only a new action, manually approved, may pay.',
+    }),
+  }),
+  PAYOUT_BATCH: Object.freeze({
+    KNOWN: Object.freeze({
+      ruleId: 'M-PAYOUT-BATCH-KNOWN',
+      outcome: 'APPROVE',
+      note: 'Always manual, with total and every recipient shown.',
+    }),
+    NEW: Object.freeze({
+      ruleId: 'M-PAYOUT-BATCH-NEW',
+      outcome: 'APPROVE_EXTRA_CONFIRMATION',
+      note: 'Approve with extra confirmation for new members.',
+    }),
+    CHANGED: Object.freeze({
+      ruleId: 'M-PAYOUT-BATCH-CHANGED',
+      outcome: 'BLOCK_MANUAL_OVERRIDE_ONLY',
+      note: 'Blocked. Only a new action, manually approved, may pay.',
+    }),
+  }),
+});
+
+export interface NeverRule {
+  id: string;
+  description: string;
+  /** Flags whose presence means this rule fired. */
+  readonly enforcedByFlags: readonly SafetyFlag[];
+}
+
+/**
+ * §6 NEVER rules. No evaluator input, workspace override or approval can
+ * bypass these — a blocked action dies and a human creates a NEW action.
+ * Single-use of approvals is enforced by the approvals service consuming the
+ * approval row inside the execution transaction.
+ */
+export const NEVER_RULES: readonly NeverRule[] = Object.freeze([
+  Object.freeze({
+    id: 'NEVER-STALE-APPROVAL',
+    description: 'Never execute on an expired or already-used approval.',
+    enforcedByFlags: ['APPROVAL_EXPIRED' as SafetyFlag, 'APPROVAL_VERSION_MISMATCH' as SafetyFlag],
+  }),
+  Object.freeze({
+    id: 'NEVER-EDIT-AFTER-APPROVAL',
+    description:
+      'Never change payee, amount, currency, or purpose after approval; edits void it.',
+    enforcedByFlags: ['APPROVAL_HASH_MISMATCH' as SafetyFlag],
+  }),
+  Object.freeze({
+    id: 'NEVER-EXCEED-CAPS',
+    description: 'Never exceed per-vendor, per-day, or batch caps.',
+    enforcedByFlags: [
+      'AMOUNT_CAP_EXCEEDED' as SafetyFlag,
+      'VENDOR_CAP_EXCEEDED' as SafetyFlag,
+      'GLOBAL_CAP_EXCEEDED' as SafetyFlag,
+      'BATCH_SIZE_EXCEEDED' as SafetyFlag,
+      'BATCH_TOTAL_EXCEEDED' as SafetyFlag,
+    ],
+  }),
+  Object.freeze({
+    id: 'NEVER-RAW-MODEL-OUTPUT',
+    description: 'Never let model output reach PayPal without code validation.',
+    enforcedByFlags: [
+      'CURRENCY_NOT_ALLOWED' as SafetyFlag,
+      'INVALID_PAYEE_EMAIL' as SafetyFlag,
+      'AMOUNT_INVALID' as SafetyFlag,
+      'DUE_DATE_INVALID' as SafetyFlag,
+    ],
+  }),
+]);
+
 export interface SafetyVerdict {
   verdict: SafetyVerdictKind;
+  /** §6 payee axis used for the matrix lookup. */
+  payeeStatus: PayeeStatus;
+  /** Matrix cell + fired NEVER rule ids. First entry is always the cell. */
+  ruleIds: string[];
+  /** §6: new-payee payouts need the amount re-entered before approval. */
+  extraConfirmationRequired: boolean;
   flags: SafetyFlag[];
   reasons: string[];
   policyVersion: string;
@@ -364,41 +498,57 @@ export function evaluateSafety(
     }
   }
 
-  // Payee changes on money OUT are hard blocks. On invoices they are a
-  // confirmation warning (the policy table in idea.md §6).
-  if (found.has('PAYEE_CHANGED') && input.type !== 'INVOICE') {
-    // handled below by BLOCKING_FLAGS membership
-  }
-
+  // idea.md §6: the action x payee-status matrix decides the baseline cell;
+  // caps and invalid fields may only make the decision stricter, never
+  // looser. The payee axis comes from the same flags the verdict reports,
+  // so the approval card and the execution gate cannot disagree about it.
   const flags = FLAG_ORDER.filter((flag) => found.has(flag));
-  const blocking = flags.filter(
-    (flag) => BLOCKING_FLAGS.has(flag) || (flag === 'PAYEE_CHANGED' && input.type !== 'INVOICE'),
-  );
+  const payeeStatus: PayeeStatus = found.has('PAYEE_CHANGED')
+    ? 'CHANGED'
+    : known
+      ? 'KNOWN'
+      : 'NEW';
+  const cell = POLICY_MATRIX[input.type][payeeStatus];
+  const blocking = flags.filter((flag) => BLOCKING_FLAGS.has(flag));
+  const cellBlocks = cell.outcome === 'BLOCK_MANUAL_OVERRIDE_ONLY';
 
   let verdict: SafetyVerdictKind;
-  if (blocking.length > 0) verdict = 'BLOCK';
-  else if (flags.length > 0) verdict = 'NEEDS_CONFIRMATION';
-  else if (input.type === 'PAYOUT_BATCH') verdict = 'NEEDS_CONFIRMATION';
+  if (blocking.length > 0 || cellBlocks) verdict = 'BLOCK';
+  else if (flags.length > 0 || cell.outcome !== 'ALLOW_UNDER_LIMIT')
+    verdict = 'NEEDS_CONFIRMATION';
   else verdict = 'ALLOW';
+
+  const firedNeverRules = NEVER_RULES.filter((rule) =>
+    rule.enforcedByFlags.some((flag) => found.has(flag)),
+  ).map((rule) => rule.id);
+  const ruleIds = [cell.ruleId, ...firedNeverRules];
+  const extraConfirmationRequired =
+    cell.outcome === 'APPROVE_EXTRA_CONFIRMATION';
 
   const reasons = flags.map((flag) => REASONS[flag]);
   const summary =
     reasons.length === 0
-      ? 'All safety checks passed.'
+      ? verdict === 'NEEDS_CONFIRMATION'
+        ? `Manual approval by policy: ${cell.note}`
+        : 'All safety checks passed.'
       : `${verdict === 'BLOCK' ? 'Blocked' : 'Needs confirmation'}: ${reasons.join('; ')}.`;
 
+  // §6: "allow under limit" means the user limit gates the cell — anything
+  // above the auto-approve limit needs a human regardless of cell.
   const autoApproveEligible =
     verdict === 'ALLOW' &&
+    cell.outcome === 'ALLOW_UNDER_LIMIT' &&
     config.autoApproveMaxAmount > 0 &&
     amount > 0 &&
     amount <= config.autoApproveMaxAmount &&
-    known &&
-    !payeeChanged &&
-    flags.length === 0 &&
-    input.type !== 'PAYOUT_BATCH';
+    payeeStatus === 'KNOWN' &&
+    flags.length === 0;
 
   return {
     verdict,
+    payeeStatus,
+    ruleIds,
+    extraConfirmationRequired,
     flags,
     reasons,
     policyVersion: SAFETY_POLICY_VERSION,
@@ -408,6 +558,8 @@ export function evaluateSafety(
 }
 
 export const POLICY_RULES = [
+  'Rows are actions, columns are payee status; every verdict cites the matrix cell (M-*) that decided it. See POLICY_MATRIX.',
+  'Four NEVER rules (NEVER-*) have no override inside a run: stale approvals, post-approval edits, caps, unvalidated model output. A human must create a new action.',
   'Human approval is the default; auto-approval is opt-in and never applies to new or changed payees.',
   'A known payee with a different PayPal email is BLOCKED for payouts; for invoices it needs confirmation and is shown on the card.',
   'New payees always require manual confirmation.',

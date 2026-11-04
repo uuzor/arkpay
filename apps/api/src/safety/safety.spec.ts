@@ -2,8 +2,12 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   DEFAULT_SAFETY_POLICY,
+  NEVER_RULES,
+  POLICY_MATRIX,
   SAFETY_POLICY_VERSION,
   evaluateSafety,
+  type PayeeStatus,
+  type SafetyActionType,
   type SafetyEvaluationInput,
 } from './policy';
 
@@ -248,4 +252,120 @@ test('auto-approve eligibility only when configured above zero and clean', () =>
 test('existing risk flags survive a re-evaluation', () => {
   const verdict = evaluateSafety(action({ riskFlags: ['DUPLICATE'] }));
   assert.ok(verdict.flags.includes('DUPLICATE'));
+});
+
+// ---------------------------------------------------------------------------
+// idea.md §6 pins: the matrix IS the spec. If a cell below changes, both the
+// matrix and this test must change together — and the policy version with it.
+// ---------------------------------------------------------------------------
+
+function cellAction(
+  type: SafetyActionType,
+  payee: PayeeStatus,
+): SafetyEvaluationInput {
+  return action({
+    type,
+    payeePaypal: payee === 'CHANGED' ? 'new@attacker.test' : 'old@acme.test',
+    contact: payee === 'NEW' ? { ...knownContact, payCount: 0 } : knownContact,
+  });
+}
+
+const MATRIX_EXPECTATIONS: Array<{
+  type: SafetyActionType;
+  payee: PayeeStatus;
+  verdict: 'ALLOW' | 'NEEDS_CONFIRMATION' | 'BLOCK';
+  extra: boolean;
+}> = [
+  { type: 'INVOICE', payee: 'KNOWN', verdict: 'ALLOW', extra: false },
+  { type: 'INVOICE', payee: 'NEW', verdict: 'NEEDS_CONFIRMATION', extra: false },
+  { type: 'INVOICE', payee: 'CHANGED', verdict: 'NEEDS_CONFIRMATION', extra: false },
+  { type: 'PAYOUT_SINGLE', payee: 'KNOWN', verdict: 'ALLOW', extra: false },
+  { type: 'PAYOUT_SINGLE', payee: 'NEW', verdict: 'NEEDS_CONFIRMATION', extra: true },
+  { type: 'PAYOUT_SINGLE', payee: 'CHANGED', verdict: 'BLOCK', extra: false },
+  { type: 'PAYOUT_BATCH', payee: 'KNOWN', verdict: 'NEEDS_CONFIRMATION', extra: false },
+  { type: 'PAYOUT_BATCH', payee: 'NEW', verdict: 'NEEDS_CONFIRMATION', extra: true },
+  { type: 'PAYOUT_BATCH', payee: 'CHANGED', verdict: 'BLOCK', extra: false },
+];
+
+test('§6 matrix: all nine cells pinned', () => {
+  for (const { type, payee, verdict, extra } of MATRIX_EXPECTATIONS) {
+    const result = evaluateSafety(cellAction(type, payee));
+    const ruleId = `M-${type.replace('_', '-')}-${payee}`;
+    assert.equal(result.verdict, verdict, `${type}/${payee} verdict`);
+    assert.equal(result.payeeStatus, payee, `${type}/${payee} axis`);
+    assert.equal(result.ruleIds[0], ruleId, `${type}/${payee} cites its cell`);
+    assert.equal(
+      result.extraConfirmationRequired,
+      extra,
+      `${type}/${payee} extra confirmation`,
+    );
+    assert.ok(POLICY_MATRIX[type][payee], `${ruleId} exists in the matrix`);
+  }
+});
+
+test('§6 every verdict cites a matrix cell and the policy version', () => {
+  const verdict = evaluateSafety(action());
+  assert.match(verdict.ruleIds[0], /^M-/);
+  assert.equal(verdict.policyVersion, SAFETY_POLICY_VERSION);
+});
+
+test('§6 cap override: an ALLOW cell still blocks when the cap is spent', () => {
+  const verdict = evaluateSafety(
+    cellAction('PAYOUT_SINGLE', 'KNOWN'),
+    { ...DEFAULT_SAFETY_POLICY, vendorDailyCap: 50 },
+  );
+  assert.equal(verdict.verdict, 'BLOCK');
+  assert.equal(verdict.ruleIds[0], 'M-PAYOUT-SINGLE-KNOWN');
+  assert.ok(verdict.ruleIds.includes('NEVER-EXCEED-CAPS'));
+});
+
+test('§6 limit override: above the auto-approve limit always needs a human', () => {
+  // Amount 100 matches the payee's usual amount, so no anomaly flag — the
+  // ONLY reason to deny eligibility is the limit.
+  assert.equal(
+    evaluateSafety(cellAction('PAYOUT_SINGLE', 'KNOWN'), {
+      ...DEFAULT_SAFETY_POLICY,
+      autoApproveMaxAmount: 50,
+    }).autoApproveEligible,
+    false,
+    '100 > limit 50',
+  );
+  assert.equal(
+    evaluateSafety(cellAction('PAYOUT_SINGLE', 'KNOWN'), {
+      ...DEFAULT_SAFETY_POLICY,
+      autoApproveMaxAmount: 150,
+    }).autoApproveEligible,
+    true,
+    '100 <= limit 150',
+  );
+});
+
+test('§6 NEVER rules fire ids for each violation class', () => {
+  const stale = evaluateSafety(
+    action({ approval: { expiresAt: '2020-01-01T00:00:00Z', now: '2026-11-04T00:00:00Z' } }),
+  );
+  assert.ok(stale.ruleIds.includes('NEVER-STALE-APPROVAL'));
+
+  const edited = evaluateSafety(action({ approval: { expectedHash: 'a', actualHash: 'b' } }));
+  assert.ok(edited.ruleIds.includes('NEVER-EDIT-AFTER-APPROVAL'));
+
+  const badCurrency = evaluateSafety(action({ currency: 'XYZ' }));
+  assert.ok(badCurrency.ruleIds.includes('NEVER-RAW-MODEL-OUTPUT'));
+
+  const overBatch = evaluateSafety(
+    action({ type: 'PAYOUT_BATCH', history: { batchTotal: DEFAULT_SAFETY_POLICY.batchMaxTotal + 1 } }),
+  );
+  assert.ok(overBatch.ruleIds.includes('NEVER-EXCEED-CAPS'));
+});
+
+test('§6 NEVER rule set is exactly the four documented rules', () => {
+  assert.deepEqual(
+    NEVER_RULES.map((rule) => rule.id),
+    [
+      'NEVER-STALE-APPROVAL',
+      'NEVER-EDIT-AFTER-APPROVAL',
+      'NEVER-EXCEED-CAPS',
+      'NEVER-RAW-MODEL-OUTPUT',
+    ],
+  );
 });
