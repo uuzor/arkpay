@@ -534,6 +534,169 @@ export function selectHistoryBudget<T extends { content: string }>(
 }
 
 /**
+ * Which non-action tool results to surface when the model goes silent after
+ * reading: any completed tool result that is NOT a state-changing action.
+ * Kept raw here; rendering truncates.
+ */
+export interface OtherToolResult {
+  toolName: string;
+  output: unknown;
+}
+
+const FRIENDLY_TOOL: Record<string, string> = {
+  get_paypal_balance: 'PayPal balance',
+  get_account_summary: 'Account summary',
+  get_spend: 'Spending',
+  search_paypal_transactions: 'Transaction search',
+  list_pending: 'Pending queue',
+  search_emails: 'Email search',
+  lookup_contact: 'Contacts',
+  get_safety_policy: 'Safety policy',
+  list_blocked_actions: 'Blocked actions',
+  get_audit_trail: 'Audit trail',
+  recall_memory: 'Saved memory',
+  remember_fact: 'Saved memory',
+  forget_fact: 'Saved memory',
+  list_schedules: 'Schedules',
+};
+
+function friendlyToolName(toolName: string): string {
+  if (FRIENDLY_TOOL[toolName]) return FRIENDLY_TOOL[toolName];
+  if (toolName.startsWith('paypal_')) return 'PayPal lookup';
+  return toolName.replace(/_/g, ' ');
+}
+
+/** One deterministic line for an arbitrary tool output. Never throws. */
+function oneLine(value: unknown, max = 220): string {
+  try {
+    if (typeof value === 'string') {
+      return value.replace(/\s+/g, ' ').trim().slice(0, max) || '(empty)';
+    }
+    if (typeof value !== 'object' || value === null) {
+      return String(value).slice(0, max);
+    }
+    if (Array.isArray(value)) {
+      return value.length === 0
+        ? 'none'
+        : `${value.length} item(s): ${oneLine(value[0], 120)}`;
+    }
+    const pairs: string[] = [];
+    for (const [k, v] of Object.entries(value)) {
+      if (pairs.length >= 4) break;
+      if (v === null || v === undefined || typeof v === 'object') continue;
+      pairs.push(`${k}: ${String(v).slice(0, 60)}`);
+    }
+    if (pairs.length > 0) return pairs.join('; ');
+    const json = JSON.stringify(value);
+    return json.length > max ? `${json.slice(0, max)}…` : json;
+  } catch {
+    return '(unreadable)';
+  }
+}
+
+function eachStepTool<T>(
+  result: unknown,
+  pick: (step: {
+    toolCalls?: Array<{ toolName?: unknown } & Record<string, unknown>>;
+    toolResults?: Array<
+      { toolName?: unknown; output?: unknown; result?: unknown } &
+        Record<string, unknown>
+    >;
+  }) => T[],
+): T[] {
+  if (!result || typeof result !== 'object') return [];
+  const r = result as {
+    steps?: unknown;
+    toolResults?: unknown;
+    toolCalls?: unknown;
+  };
+  const out: T[] = [];
+  if (Array.isArray(r.steps)) {
+    for (const step of r.steps) {
+      if (step && typeof step === 'object') {
+        out.push(
+          ...pick(
+            step as {
+              toolCalls?: Array<{ toolName?: unknown } & Record<string, unknown>>;
+              toolResults?: Array<
+                { toolName?: unknown; output?: unknown; result?: unknown } &
+                  Record<string, unknown>
+              >;
+            },
+          ),
+        );
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * True when the model issued (or completed) a state-changing action tool.
+ * The empty-reply retry must never fire then — a second attempt could
+ * draft twice, remind twice, or schedule twice. Read-only tools are safe
+ * to retry: they change nothing.
+ */
+export function hasActionActivity(
+  result: unknown,
+  actionNames: ReadonlySet<string> | readonly string[],
+): boolean {
+  const set = actionNames instanceof Set ? actionNames : new Set(actionNames);
+  const calls = eachStepTool(result, (step) => step.toolCalls ?? []);
+  if (calls.some((c) => typeof c.toolName === 'string' && set.has(c.toolName))) {
+    return true;
+  }
+  const results = eachStepTool(result, (step) => step.toolResults ?? []);
+  return results.some(
+    (t) => typeof t.toolName === 'string' && set.has(t.toolName),
+  );
+}
+
+/**
+ * Completed non-action tool results, oldest first, capped. Rendered only
+ * when the model goes silent after reading, so a lookup never degrades to
+ * the amnesiac "I'm here" fallback.
+ */
+export function collectNonActionResults(
+  result: unknown,
+  actionNames: ReadonlySet<string> | readonly string[],
+  maxItems = 4,
+): OtherToolResult[] {
+  const set = actionNames instanceof Set ? actionNames : new Set(actionNames);
+  const found = eachStepTool(result, (step) => step.toolResults ?? []);
+  const out: OtherToolResult[] = [];
+  for (const t of found) {
+    if (out.length >= maxItems) break;
+    if (!t || typeof t.toolName !== 'string' || set.has(t.toolName)) continue;
+    const output =
+      'output' in t && t.output !== undefined ? t.output : t.result;
+    out.push({ toolName: t.toolName, output: output ?? null });
+  }
+  return out;
+}
+
+/**
+ * Honest fallback for "read tools ran, model said nothing": show the facts
+ * instead of greeting the user like a stranger. Null when there is nothing
+ * to show — the caller keeps the canned line as the last resort.
+ */
+export function describeNonActionResults(
+  items: OtherToolResult[] | null | undefined,
+): string | null {
+  const rows = (items ?? []).filter(
+    (it) => it && typeof it.toolName === 'string',
+  );
+  if (rows.length === 0) return null;
+  const lines = rows
+    .slice(0, 4)
+    .map((it) => `• ${friendlyToolName(it.toolName)}: ${oneLine(it.output)}`);
+  return (
+    "I looked that up but couldn't phrase the answer. Here's what I found:\n" +
+    `${lines.join('\n')}\nAsk me to explain any of it.`
+  );
+}
+
+/**
  * One-line shape summary for an empty model result: finish reasons, per-step
  * text/call/result counts, warnings, usage. Logged with the retry warning so
  * the next silent turn explains itself instead of just falling back.

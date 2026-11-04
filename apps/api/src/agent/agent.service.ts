@@ -18,8 +18,10 @@ import {
   MEMORY_KEY_HINTS,
   RETRY_NUDGE,
   buildScheduleCreate,
+  collectNonActionResults,
   describeActionResult,
-  hasToolActivity,
+  describeNonActionResults,
+  hasActionActivity,
   memoryBlockForPrompt,
   mergeInvoiceFollowUp,
   missingFieldsQuestion,
@@ -398,13 +400,16 @@ export class AgentService {
       });
     try {
       let result = await generateOnce();
-      // Empty with zero tool activity means nothing ran, so one retry is
-      // safe — but it must DIFFER (nudge + warmer sampling): an identical
-      // retry reproduces a deterministic stall. Never retry after a tool
-      // ran — a second attempt could duplicate a partially-applied action.
-      if (!result.text?.trim() && !hasToolActivity(result)) {
+      // Empty with no ACTION tool activity means nothing state-changing ran,
+      // so one retry is safe — but it must DIFFER (nudge + warmer sampling):
+      // an identical retry reproduces a deterministic stall. Never retry
+      // after an action ran — a second attempt could draft/remind/schedule
+      // twice. Read-only tools are side-effect free, so silence after a
+      // lookup IS retried (that is the "I'm here" hole: the old gate only
+      // retried zero-tool-activity turns).
+      if (!result.text?.trim() && !hasActionActivity(result, ACTION_TOOL_NAMES)) {
         this.logger.warn(
-          `agent empty reply with no tool calls; retrying once (${summarizeEmptyResult(result)})`,
+          `agent empty reply with no action calls; retrying once (${summarizeEmptyResult(result)})`,
         );
         result = await generateOnce(
           [{ role: 'user', content: RETRY_NUDGE }],
@@ -437,6 +442,9 @@ export class AgentService {
         (lastAction
           ? describeActionResult(lastAction.toolName, lastAction.output)
           : null) ||
+        describeNonActionResults(
+          collectNonActionResults(result, ACTION_TOOL_NAMES),
+        ) ||
         (documentRef.current
           ? 'Here’s your statement.'
           : 'I’m here — what would you like me to do?');
@@ -749,12 +757,12 @@ export class AgentService {
     }
     let reply = '';
     let lastAction: { toolName: string; output: unknown } | null = null;
-    let sawToolCall = false;
+    let otherResults: { toolName: string; output: unknown }[] = [];
     try {
       for (let attempt = 1; ; attempt += 1) {
         reply = '';
         lastAction = null;
-        sawToolCall = false;
+        otherResults = [];
         documentRef.current = null;
         const result = streamText({
           model,
@@ -787,7 +795,6 @@ export class AgentService {
               await onEvent({ type: 'text-delta', text });
             }
           } else if (part.type === 'tool-call') {
-            sawToolCall = true;
             const toolName = String(part.toolName ?? 'unknown');
             const input = part.input ?? part.args ?? {};
             this.logger.log(
@@ -822,6 +829,13 @@ export class AgentService {
               }
               if (ACTION_TOOL_NAMES.has(toolName)) {
                 lastAction = { toolName, output };
+              } else if (
+                otherResults.length < 4 &&
+                (output === null ||
+                  typeof output === 'string' ||
+                  typeof output === 'object')
+              ) {
+                otherResults.push({ toolName, output: summarizeIO(output) });
               }
             } else if (part.type === 'finish') {
               finishReason = String(part.finishReason ?? 'stop');
@@ -857,10 +871,11 @@ export class AgentService {
           (lastAction
             ? describeActionResult(lastAction.toolName, lastAction.output)
             : null) ||
+          describeNonActionResults(otherResults) ||
           (documentRef.current
             ? 'Here’s your statement.'
             : 'I’m here — what would you like me to do?');
-        if (reply.trim() || sawToolCall || documentRef.current || attempt > 1) {
+        if (reply.trim() || lastAction || documentRef.current || attempt > 1) {
           if (!reply.trim()) {
             await onEvent({ type: 'text-delta', text: finalReply });
           }
@@ -874,7 +889,7 @@ export class AgentService {
           break;
         }
         this.logger.warn(
-          `agent stream empty with no tool calls; retrying once (finish=${finishReason} sawTool=${sawToolCall})`,
+          `agent stream empty with no action calls; retrying once (finish=${finishReason} actions=${lastAction ? 1 : 0})`,
         );
       }
     } catch (e) {

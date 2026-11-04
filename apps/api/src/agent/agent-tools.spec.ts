@@ -3,7 +3,10 @@ import { test } from 'node:test';
 import {
   MEMORY_KEY_HINTS,
   buildScheduleCreate,
+  collectNonActionResults,
   describeActionResult,
+  describeNonActionResults,
+  hasActionActivity,
   hasToolActivity,
   memoryBlockForPrompt,
   mergeInvoiceFollowUp,
@@ -413,4 +416,60 @@ test('selectHistoryBudget keeps the newest turns inside a char budget', () => {
   assert.match(huge[0].content, /^2:/);
   // Everything fits: order preserved.
   assert.deepStrictEqual(selectHistoryBudget(msgs, 10_000).length, 3);
+});
+
+test('hasActionActivity blocks retry only after state-changing tools', () => {
+  const actions = ['create_invoice_draft', 'request_payout'];
+  assert.equal(hasActionActivity({ steps: [] }, actions), false);
+  assert.equal(
+    hasActionActivity(
+      { steps: [{ toolCalls: [{ toolName: 'get_paypal_balance' }] }] },
+      actions,
+    ),
+    false,
+  );
+  assert.equal(
+    hasActionActivity(
+      { steps: [{ toolCalls: [{ toolName: 'request_payout' }] }] },
+      actions,
+    ),
+    true,
+  );
+  assert.equal(
+    hasActionActivity(
+      { steps: [{ toolResults: [{ toolName: 'create_invoice_draft', output: {} }] }] },
+      actions,
+    ),
+    true,
+  );
+});
+
+test('collectNonActionResults skips action tools and caps items', () => {
+  const actions = ['request_payout'];
+  const result = {
+    steps: [
+      {
+        toolResults: [
+          { toolName: 'request_payout', output: { ok: true } },
+          { toolName: 'get_paypal_balance', output: { available: true } },
+          { toolName: 'search_emails', output: { count: 2 } },
+        ],
+      },
+    ],
+  };
+  const got = collectNonActionResults(result, actions, 1);
+  assert.equal(got.length, 1);
+  assert.equal(got[0].toolName, 'get_paypal_balance');
+  assert.deepStrictEqual(collectNonActionResults({ steps: [] }, actions), []);
+});
+
+test('describeNonActionResults shows facts instead of the canned greeting', () => {
+  assert.equal(describeNonActionResults([]), null);
+  assert.equal(describeNonActionResults(null), null);
+  const text = describeNonActionResults([
+    { toolName: 'get_paypal_balance', output: { available: true, currency: 'USD' } },
+  ]);
+  assert.match(text ?? '', /PayPal balance/);
+  assert.match(text ?? '', /couldn't phrase the answer/);
+  assert.ok(!(text ?? '').includes("I'm here"));
 });
