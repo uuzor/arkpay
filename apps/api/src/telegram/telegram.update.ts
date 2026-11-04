@@ -388,24 +388,49 @@ export class TelegramUpdate {
     await this.runAgent(ctx, text);
   }
 
-  /** Voice notes: download from Telegram, transcribe on Vultr, then act. */
+  /**
+   * Ephemeral progress note ("Transcribing…", "Reading…"). The id comes
+   * back so the handler can delete the note before the real reply lands —
+   * the chat shows the answer, not the scaffolding.
+   */
+  private async sendStatus(ctx: Context, text: string): Promise<number | null> {
+    try {
+      const sent = await ctx.reply(text);
+      return (sent as { message_id?: number } | undefined)?.message_id ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Best-effort status cleanup: a stale note is cosmetic, never fatal. */
+  private async clearStatus(ctx: Context, id: number | null): Promise<void> {
+    if (id == null) return;
+    try {
+      await ctx.deleteMessage(id);
+    } catch {
+      // Already gone (manual delete, race) — the reply still goes out.
+    }
+  }
+
+  /** Voice notes: download from Telegram, transcribe, then act. */
   @On('voice')
   async onVoice(@Ctx() ctx: Context): Promise<void> {
     if (!(await this.requireLink(ctx))) return;
     const voice = (ctx.message as { voice?: { file_id: string } } | undefined)
       ?.voice;
     if (!voice?.file_id) return;
-    await ctx.reply('🎤 Transcribing…');
+    const statusId = await this.sendStatus(ctx, '🎤 Transcribing…');
     try {
       const audio = await this.downloadFile(ctx, voice.file_id);
       const transcript = await this.transcription.transcribe(audio, 'ogg');
+      await this.clearStatus(ctx, statusId);
       if (!transcript) {
         await ctx.reply('I couldn’t hear any speech in that voice note.');
         return;
       }
-      await ctx.reply(`🎤 “${transcript.slice(0, 500)}”`);
       await this.runAgent(ctx, transcript);
     } catch (e) {
+      await this.clearStatus(ctx, statusId);
       await ctx.reply(
         `Voice transcription failed: ${e instanceof Error ? e.message : String(e)}`,
       );
@@ -433,7 +458,7 @@ export class TelegramUpdate {
       await ctx.reply('That file is larger than Telegram’s 20 MB bot limit.');
       return;
     }
-    await ctx.reply('📄 Reading…');
+    const statusId = await this.sendStatus(ctx, '📄 Reading…');
     try {
       const buffer = await this.downloadFile(ctx, doc.file_id);
       const name = doc.file_name ?? 'document';
@@ -473,6 +498,7 @@ export class TelegramUpdate {
           mime.startsWith('image/') ? mime : 'image/jpeg',
         );
       } else {
+        await this.clearStatus(ctx, statusId);
         await ctx.reply(
           'I can read PDF, text, CSV, JSON, audio and image files right now. Video analysis is next.',
         );
@@ -485,17 +511,20 @@ export class TelegramUpdate {
         (mime === 'application/pdf' || /\.pdf$/i.test(name)) &&
         text.replace(/\s+/g, '').length < 50
       ) {
+        await this.clearStatus(ctx, statusId);
         await ctx.reply(
           'That PDF looks scanned (no readable text inside). Send me photos of the pages and I’ll read them.',
         );
         return;
       }
+      await this.clearStatus(ctx, statusId);
       const reply = await this.agent.run(
         ctx.from!.id,
         `I uploaded a document named ${name}. Here is its text:\n\n${text.slice(0, 20_000)}\n\nAnalyze it. If it is a money request, use create_invoice_draft. Otherwise summarize what it is.`,
       );
       await this.sendAgentReply(ctx, reply);
     } catch (e) {
+      await this.clearStatus(ctx, statusId);
       await ctx.reply(
         `I couldn’t read that file: ${e instanceof Error ? e.message : String(e)}`,
       );
@@ -511,18 +540,20 @@ export class TelegramUpdate {
     const best = photos?.[photos.length - 1];
     if (!best?.file_id) return;
     this.logger.log(`photo from ${ctx.from?.id ?? 'unknown'}`);
-    await ctx.reply('🖼️ Reading…');
+    const statusId = await this.sendStatus(ctx, '🖼️ Reading…');
     try {
       const buffer = await this.downloadFile(ctx, best.file_id);
       const seen = await this.describeImageForAgent(buffer, 'image/jpeg');
       const caption = (
         ctx.message as { caption?: string } | undefined
       )?.caption?.trim();
+      await this.clearStatus(ctx, statusId);
       await this.runAgent(
         ctx,
         `I uploaded a photo${caption ? ` with caption "${caption}"` : ''}. Here is what it shows:\n\n${seen.slice(0, 20_000)}\n\nAnalyze it. If it is a bill, receipt or money request, extract payee/amount/purpose and use create_invoice_draft or request_payout. Otherwise summarize what it is.`,
       );
     } catch (e) {
+      await this.clearStatus(ctx, statusId);
       await ctx.reply(
         `I couldn’t read that photo: ${e instanceof Error ? e.message : String(e)}`,
       );
@@ -546,7 +577,7 @@ export class TelegramUpdate {
     )?.audio;
     if (!audio?.file_id) return;
     this.logger.log(`audio from ${ctx.from?.id ?? 'unknown'}`);
-    await ctx.reply('🎤 Transcribing…');
+    const statusId = await this.sendStatus(ctx, '🎤 Transcribing…');
     try {
       const buffer = await this.downloadFile(ctx, audio.file_id);
       const format = (audio.mime_type ?? '').includes('mpeg')
@@ -555,13 +586,14 @@ export class TelegramUpdate {
           ? 'm4a'
           : 'ogg';
       const transcript = await this.transcription.transcribe(buffer, format);
+      await this.clearStatus(ctx, statusId);
       if (!transcript) {
         await ctx.reply('I couldn’t hear any speech in that audio.');
         return;
       }
-      await ctx.reply(`🎤 “${transcript.slice(0, 500)}”`);
       await this.runAgent(ctx, transcript);
     } catch (e) {
+      await this.clearStatus(ctx, statusId);
       await ctx.reply(
         `Audio transcription failed: ${e instanceof Error ? e.message : String(e)}`,
       );

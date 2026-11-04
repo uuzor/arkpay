@@ -19,6 +19,7 @@
     "test:multitenant": "nest build && dotenv -e ../../.env -- node ../../scripts/test-multitenant.cjs",
     "test:dashboard-api": "nest build && dotenv -e ../../.env -- node ../../scripts/test-dashboard-api.cjs",
     "test:demo": "nest build && dotenv -e ../../.env -- node ../../scripts/test-demo.cjs",
+    "test:telegram-voice": "nest build && dotenv -e ../../.env -- node ../../scripts/test-telegram-voice.cjs",
     "owner:connect-gmail": "nest build && dotenv -e ../../.env -- node ../../scripts/connect-owner-gmail.cjs",
     "owner:connect-paypal": "nest build && dotenv -e ../../.env -- node ../../scripts/connect-owner-paypal.cjs",
     "prisma:generate": "prisma generate",
