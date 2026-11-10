@@ -4,15 +4,11 @@ import { useQuery } from "@tanstack/react-query";
 import {
   LayoutDashboard,
   Inbox,
-  ListChecks,
-  FileText,
+  ArrowDownLeft,
   ArrowUpRight,
-  Repeat,
-  Scale,
   CalendarClock,
   ContactRound,
   ScrollText,
-  SlidersHorizontal,
   Settings,
   LogOut,
   X,
@@ -37,16 +33,12 @@ export default function SidebarNav({ open, onClose }) {
 
   const nav = [
     { label: "Overview", to: "/overview", icon: LayoutDashboard },
-    { label: "Requests", to: "/requests", icon: Inbox },
-    { label: "Approvals", to: "/approvals", icon: ListChecks, badge: pending?.totalCount || null },
-    { label: "Invoices", to: "/invoices", icon: FileText },
+    { label: "Inbox", to: "/inbox", icon: Inbox, badge: pending?.totalCount || null },
+    { label: "Money in", to: "/money", icon: ArrowDownLeft },
     { label: "Payouts", to: "/payouts", icon: ArrowUpRight },
-    { label: "Subscriptions", to: "/subscriptions", icon: Repeat },
-    { label: "Disputes", to: "/disputes", icon: Scale },
-    { label: "Schedules", to: "/schedules", icon: CalendarClock },
     { label: "Contacts", to: "/contacts", icon: ContactRound },
-    { label: "Audit", to: "/audit", icon: ScrollText },
-    { label: "Rules", to: "/rules", icon: SlidersHorizontal },
+    { label: "Schedules", to: "/schedules", icon: CalendarClock },
+    { label: "Activity", to: "/audit", icon: ScrollText },
     { label: "Settings", to: "/settings", icon: Settings },
   ];
 

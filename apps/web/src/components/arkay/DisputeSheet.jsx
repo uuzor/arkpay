@@ -1,13 +1,8 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
+import DetailSheet from "@/components/arkay/DetailSheet";
 import StatusPill from "@/components/arkay/StatusPill";
 import Money from "@/components/arkay/Money";
 import { billingDisputeDetailQuery } from "@/lib/queries";
-
-export const Route = createFileRoute("/_authed/disputes_/$disputeId")({
-  head: () => ({ meta: [{ title: "Dispute · Arkay" }] }),
-  component: DisputeDetailPage,
-});
 
 const SUGGESTIONS = {
   send_message: "Reply to the buyer",
@@ -37,18 +32,16 @@ function fmtDate(value) {
   });
 }
 
-function DisputeDetailPage() {
-  const { disputeId } = Route.useParams();
-  const detail = useQuery(billingDisputeDetailQuery(disputeId));
+export default function DisputeSheet({ disputeId, open, onOpenChange }) {
+  const detail = useQuery({
+    ...billingDisputeDetailQuery(disputeId),
+    enabled: open && Boolean(disputeId),
+  });
   const d = detail.data;
   const tone = toneFor(d);
 
   return (
-    <div className="space-y-4">
-      <Link to="/disputes" className="text-[12px] font-medium text-steel hover:text-ink">
-        ← All disputes
-      </Link>
-
+    <DetailSheet open={open} onOpenChange={onOpenChange} title={d?.reasonText ?? "Dispute"}>
       {detail.isLoading ? (
         <div className="h-40 animate-pulse rounded-xl bg-fog" />
       ) : detail.isError ? (
@@ -141,6 +134,6 @@ function DisputeDetailPage() {
           </p>
         </>
       )}
-    </div>
+    </DetailSheet>
   );
 }

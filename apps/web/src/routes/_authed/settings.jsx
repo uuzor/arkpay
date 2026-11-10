@@ -19,8 +19,13 @@ import { cn } from "@/lib/utils";
 import { API_BASE, apiJson } from "@/lib/api";
 import { useAuth } from "@/lib/AuthContext";
 import { workspaceQuery } from "@/lib/queries";
+import SectionTabs from "@/components/arkay/SectionTabs";
+import RulesPanel from "@/components/arkay/RulesPanel";
 
 export const Route = createFileRoute("/_authed/settings")({
+  validateSearch: (search) => ({
+    tab: search?.tab === "policy" ? "policy" : "general",
+  }),
   head: () => ({ meta: [{ title: "Settings · Arkay" }] }),
   component: SettingsPage,
 });
@@ -67,6 +72,7 @@ const inputCls =
 const labelCls = "text-[11px] font-medium uppercase tracking-[0.12em] text-steel";
 
 function SettingsPage() {
+  const { tab } = Route.useSearch();
   const { user, logout } = useAuth();
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
@@ -156,11 +162,22 @@ function SettingsPage() {
       <header>
         <h1 className="text-[22px] font-semibold tracking-[-0.03em] text-ink">Settings</h1>
         <p className="mt-1 text-[12.5px] text-pewter">
-          {data?.name ? `Workspace ${data.name} — ` : ""}profile, connections, session and data handling.
+          {data?.name ? `Workspace ${data.name} — ` : ""}profile, connections, session, data handling and policy.
         </p>
       </header>
 
-      {workspace.isLoading ? (
+      <SectionTabs
+        to="/settings"
+        active={tab}
+        tabs={[
+          { value: "general", label: "General" },
+          { value: "policy", label: "Policy" },
+        ]}
+      />
+
+      {tab === "policy" ? (
+        <RulesPanel />
+      ) : workspace.isLoading ? (
         <div className="space-y-3">
           {[0, 1, 2].map((i) => (
             <div key={i} className="h-32 animate-pulse rounded-xl bg-fog" />

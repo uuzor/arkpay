@@ -287,9 +287,6 @@ export const overviewQuery = queryOptions({
         apiJson("/audit/recent?limit=8"),
         apiJson("/workspaces/me"),
       ]);
-    const payroll = (schedules ?? [])
-      .filter((row) => row.kind === "PAYROLL_PREPARE")
-      .sort((a, b) => String(a.nextRunAt).localeCompare(String(b.nextRunAt)))[0];
     return {
       pendingCount: pending.totalCount ?? pending.rows?.length ?? 0,
       pendingRows: pending.rows ?? [],
@@ -297,7 +294,6 @@ export const overviewQuery = queryOptions({
         (payouts.totalCount ?? 0) + (invoices.totalCount ?? 0),
       blockedCount: Array.isArray(blocked) ? blocked.length : 0,
       blockedRows: Array.isArray(blocked) ? blocked.slice(0, 3) : [],
-      nextPayroll: payroll ?? null,
       schedules: schedules ?? [],
       recent: audit ?? [],
       workspace,

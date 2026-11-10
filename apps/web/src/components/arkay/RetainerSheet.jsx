@@ -1,14 +1,9 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
+import DetailSheet from "@/components/arkay/DetailSheet";
 import StatusPill from "@/components/arkay/StatusPill";
 import Money from "@/components/arkay/Money";
 import RiskChip from "@/components/arkay/RiskChip";
 import { billingSubscriptionDetailQuery } from "@/lib/queries";
-
-export const Route = createFileRoute("/_authed/subscriptions_/$subscriptionId")({
-  head: () => ({ meta: [{ title: "Subscription · Arkay" }] }),
-  component: SubscriptionDetailPage,
-});
 
 function toneFor(status) {
   if (status === "ACTIVE") return { status: "executed", label: "Active" };
@@ -38,18 +33,20 @@ function fmtDate(value) {
   });
 }
 
-function SubscriptionDetailPage() {
-  const { subscriptionId } = Route.useParams();
-  const detail = useQuery(billingSubscriptionDetailQuery(subscriptionId));
+export default function RetainerSheet({ subscriptionId, open, onOpenChange }) {
+  const detail = useQuery({
+    ...billingSubscriptionDetailQuery(subscriptionId),
+    enabled: open && Boolean(subscriptionId),
+  });
   const sub = detail.data;
   const tone = toneFor(sub?.status);
 
   return (
-    <div className="space-y-4">
-      <Link to="/subscriptions" className="text-[12px] font-medium text-steel hover:text-ink">
-        ← All subscriptions
-      </Link>
-
+    <DetailSheet
+      open={open}
+      onOpenChange={onOpenChange}
+      title={sub?.subscriberName || sub?.subscriberEmail || "Subscription"}
+    >
       {detail.isLoading ? (
         <div className="h-40 animate-pulse rounded-xl bg-fog" />
       ) : detail.isError ? (
@@ -137,6 +134,6 @@ function SubscriptionDetailPage() {
           </p>
         </>
       )}
-    </div>
+    </DetailSheet>
   );
 }

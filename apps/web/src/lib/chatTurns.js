@@ -149,42 +149,32 @@ export function contextForPath(pathname = "") {
 
 const CHIPS = {
   overview: ["What's my balance?", "Who hasn't paid?", "How did October look?"],
-  approvals: ["What's in my queue?", "Why were any actions blocked?", "What are my caps?"],
-  requests: ["What came in today?", "Anything duplicated?", "What's pending?"],
-  invoices: ["Who hasn't paid?", "Any overdue invoices?", "What came in today?"],
+  inbox: ["What came in today?", "What's in my queue?", "Anything duplicated?"],
+  money: ["Who hasn't paid?", "Anything past due?", "Anything need my reply?"],
   payouts: ["What's in flight?", "Any failed payouts?", "What are my caps?"],
-  contacts: ["Which contacts changed?", "Who do I pay the most?", "How much did I pay Chidi?"],
-  payroll: ["What's in this payroll run?", "Is the batch under the cap?"],
+  contacts: ["Which contacts changed?", "Verify this client for me", "Any new payees?"],
   schedules: ["What runs next?", "Any failed runs?"],
-  rules: ["What are my caps?", "Which payee changes get blocked?", "Any blocked actions?"],
   audit: ["What was blocked today?", "What came in today?", "Who hasn't paid?"],
+  settings: ["What are my caps?", "Which payee changes get blocked?", "Any blocked actions?"],
 };
 
-const DETAIL_CHIPS = ["Summarize the risk here", "Why is this blocked?", "What checks ran?"];
-
 export function chipsForPath(pathname = "") {
-  if (/^\/(requests|invoices|payouts)\/[^/]+/.test(pathname)) return DETAIL_CHIPS;
   const key = pathname.split("/")[1] || "overview";
   return CHIPS[key] ?? CHIPS.overview;
 }
 
 const LABELS = {
   overview: "on your overview",
-  approvals: "on approvals",
-  requests: "on requests",
-  invoices: "on invoices",
+  inbox: "in your inbox",
+  money: "on money in",
   payouts: "on payouts",
   contacts: "on contacts",
-  payroll: "on payroll",
   schedules: "on schedules",
-  rules: "on rules",
-  audit: "on audit",
+  audit: "on activity",
   settings: "on settings",
 };
 
 export function contextLabel(pathname = "") {
-  const match = /^\/(requests|invoices|payouts)\/([^/]+)/.exec(pathname);
-  if (match) return `on ${match[2]}`;
   const key = pathname.split("/")[1] || "overview";
   return LABELS[key] ?? "on this tab";
 }

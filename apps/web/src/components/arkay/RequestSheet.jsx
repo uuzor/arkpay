@@ -1,18 +1,14 @@
 import { useState } from "react";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowLeft, Play } from "lucide-react";
+import { Play } from "lucide-react";
+import DetailSheet from "@/components/arkay/DetailSheet";
 import StatusPill from "@/components/arkay/StatusPill";
 import Money from "@/components/arkay/Money";
 import { apiJson } from "@/lib/api";
 import { actionTone, actionTypeLabel, emailTone, timeAgo } from "@/lib/actionShapes";
 import { emailDetailQuery } from "@/lib/queries";
-
-export const Route = createFileRoute("/_authed/requests_/$requestId")({
-  head: () => ({ meta: [{ title: "Request · Arkay" }] }),
-  component: RequestDetailPage,
-});
 
 function ExtractedJson({ value }) {
   if (!value || typeof value !== "object") {
@@ -34,11 +30,13 @@ function ExtractedJson({ value }) {
   );
 }
 
-function RequestDetailPage() {
-  const { requestId } = Route.useParams();
+export default function RequestSheet({ emailId, open, onOpenChange }) {
   const queryClient = useQueryClient();
   const [piping, setPiping] = useState(false);
-  const { data: email, isLoading, isError, error } = useQuery(emailDetailQuery(requestId));
+  const { data: email, isLoading, isError, error } = useQuery({
+    ...emailDetailQuery(emailId),
+    enabled: open && Boolean(emailId),
+  });
 
   const runPipeline = async () => {
     setPiping(true);
@@ -62,25 +60,24 @@ function RequestDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="space-y-4">
+      <DetailSheet open={open} onOpenChange={onOpenChange} title="Email">
         <div className="h-36 animate-pulse rounded-xl bg-fog" />
         <div className="h-64 animate-pulse rounded-xl bg-fog" />
-      </div>
+      </DetailSheet>
     );
   }
 
   if (isError || !email) {
     const notFound = error?.status === 404;
     return (
-      <div className="rounded-xl border border-mist/70 bg-paper px-4 py-12 text-center">
-        <p className="text-[14px] font-semibold text-ink">{notFound ? "Email not found" : "Could not load this email"}</p>
-        <p className="mt-1 text-[12px] text-pewter">
-          {notFound ? "It may belong to another workspace." : (error?.message ?? "Unknown error.")}
-        </p>
-        <Link to="/requests" className="mt-4 inline-block rounded-xl bg-ink px-3.5 py-2 text-[12.5px] font-semibold text-paper">
-          Back to requests
-        </Link>
-      </div>
+      <DetailSheet open={open} onOpenChange={onOpenChange} title="Email">
+        <div className="rounded-xl border border-mist/70 bg-paper px-4 py-12 text-center">
+          <p className="text-[14px] font-semibold text-ink">{notFound ? "Email not found" : "Could not load this email"}</p>
+          <p className="mt-1 text-[12px] text-pewter">
+            {notFound ? "It may belong to another workspace." : (error?.message ?? "Unknown error.")}
+          </p>
+        </div>
+      </DetailSheet>
     );
   }
 
@@ -121,11 +118,7 @@ function RequestDetailPage() {
   };
 
   return (
-    <div className="space-y-4">
-      <Link to="/requests" className="inline-flex items-center gap-1.5 text-[12px] font-medium text-graphite hover:text-ink">
-        <ArrowLeft className="h-3.5 w-3.5" /> All requests
-      </Link>
-
+    <DetailSheet open={open} onOpenChange={onOpenChange} title={email.subject || "Email"}>
       <div className="rounded-xl border border-mist/70 bg-paper">
         <div className="flex flex-wrap items-start justify-between gap-4 border-b border-mist/60 px-4 py-4 sm:px-5">
           <div className="min-w-0">
@@ -174,7 +167,8 @@ function RequestDetailPage() {
               return (
                 <li key={a.id}>
                   <Link
-                    to="/approvals"
+                    to="/inbox"
+                    search={{ tab: "approvals" }}
                     className="flex flex-wrap items-center gap-3 px-4 py-3 transition-colors hover:bg-fog/50 sm:px-5"
                   >
                     <span className="rounded-md bg-fog px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.06em] text-graphite">
@@ -232,6 +226,6 @@ function RequestDetailPage() {
           </div>
         </div>
       </div>
-    </div>
+    </DetailSheet>
   );
 }

@@ -112,8 +112,7 @@ export function describeActionResult(
 export type AgentScheduleKind =
   | 'NOTIFY'
   | 'AGENT_TASK'
-  | 'INVOICE_REMINDERS'
-  | 'PAYROLL_PREPARE';
+  | 'INVOICE_REMINDERS';
 export type AgentScheduleTrigger = 'ONCE' | 'INTERVAL' | 'CRON';
 
 export interface AgentScheduleInput {
@@ -146,11 +145,13 @@ export interface AgentScheduleInvalid {
   error: string;
 }
 
+// NOTE (Nov 2026 redesign): PAYROLL_PREPARE is frozen for the solo-earner
+// story. The scheduler backend still runs existing payroll schedules; the
+// agent just can't create new ones.
 const AGENT_SCHEDULE_KINDS: AgentScheduleKind[] = [
   'NOTIFY',
   'AGENT_TASK',
   'INVOICE_REMINDERS',
-  'PAYROLL_PREPARE',
 ];
 const AGENT_SCHEDULE_TRIGGERS: AgentScheduleTrigger[] = [
   'ONCE',

@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router";
 const COLUMNS = [
   {
     title: "Product",
-    links: ["Overview", "Requests", "Subscriptions", "Contacts", "Audit log"],
+    links: ["Overview", "Inbox", "Money in", "Contacts", "Activity"],
   },
   {
     title: "Safety",

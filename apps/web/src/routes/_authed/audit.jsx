@@ -10,7 +10,7 @@ import { ACTION_STATUS_FILTERS, actionTone, actionTypeLabel, summarizeJson } fro
 import { auditRecentQuery } from "@/lib/queries";
 
 export const Route = createFileRoute("/_authed/audit")({
-  head: () => ({ meta: [{ title: "Audit log · Arkay" }] }),
+  head: () => ({ meta: [{ title: "Activity · Arkay" }] }),
   component: AuditPage,
 });
 
@@ -49,9 +49,9 @@ function AuditPage() {
     <div className="space-y-4">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-[22px] font-semibold tracking-[-0.03em] text-ink">Audit log</h1>
+          <h1 className="text-[22px] font-semibold tracking-[-0.03em] text-ink">Activity</h1>
           <p className="mt-1 text-[12.5px] text-pewter">
-            Append-only ledger. Every read, flag, decision and PayPal result is kept — including the ones that never moved money.
+            Everything Arkay did, newest first — reads, flags, decisions and PayPal results, including the ones that never moved money.
           </p>
         </div>
         <span className="rounded-md bg-fog px-2 py-1 font-mono text-[10.5px] text-graphite">

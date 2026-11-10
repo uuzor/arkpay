@@ -51,10 +51,11 @@ export default function DraftCard({ draft }) {
           {checksLine}
         </p>
         <Link
-          to="/approvals"
+          to="/inbox"
+          search={{ tab: "approvals" }}
           className="mt-2.5 inline-flex items-center gap-1 rounded-lg border border-mist/80 px-2.5 py-1.5 text-[11.5px] font-medium text-ink hover:bg-fog"
         >
-          Review in Approvals
+          Review in Inbox
           <ArrowUpRight className="h-3 w-3 text-steel" />
         </Link>
       </div>

@@ -136,7 +136,7 @@ export class DemoService {
     const daniel = await contact(
       'Daniel Eze',
       'daniel@example.com',
-      ContactKind.SUPPLIER,
+      ContactKind.CLIENT,
       780,
       5,
     );
@@ -186,16 +186,16 @@ export class DemoService {
     const payoutMail = await email(
       'demo-gmail-2',
       'Daniel Eze <daniel@example.com>',
-      'Paper supply payment',
-      'Hello, kindly pay $780 for the paper supply delivered last week. — Daniel',
+      'Refund for the canceled order',
+      'Hello, kindly refund $780 for the canceled flyer order to this address. — Daniel',
       EmailStatus.PROCESSED,
       3,
     );
     const fraudMail = await email(
       'demo-gmail-3',
       'Daniel Eze <daniel@example.com>',
-      'URGENT: our PayPal email changed',
-      'Urgent — our PayPal email changed, pay 100.00 USD to new-address@example.net immediately.',
+      'URGENT: refund to my new PayPal email',
+      'Urgent — please refund 100.00 USD to my new PayPal email new-address@example.net immediately.',
       EmailStatus.PROCESSED,
       2,
     );
@@ -288,12 +288,12 @@ export class DemoService {
         payeeName: 'Daniel Eze',
         payeePaypal: 'daniel@example.com',
         amount: 780,
-        purpose: 'Paper supply',
+        purpose: 'Refund: canceled flyer order',
         confidence: 0.95,
         status: ActionStatus.PENDING_APPROVAL,
         riskFlags: [],
         verdict: 'ALLOW',
-        summary: 'Known supplier · 5 payments · usual $780.00',
+        summary: 'Known client · 5 invoices · usual $780.00',
         audit: ['CREATED', 'CARD_SENT'],
       },
       {
@@ -304,7 +304,7 @@ export class DemoService {
         payeeName: 'Rapid Prints NG',
         payeePaypal: 'hello@example.com',
         amount: 480,
-        purpose: 'Business cards print run',
+        purpose: 'Contractor: business cards print run',
         confidence: 0.82,
         status: ActionStatus.PENDING_APPROVAL,
         riskFlags: ['NEW_PAYEE'],
@@ -354,7 +354,7 @@ export class DemoService {
         payeeName: 'Daniel Eze',
         payeePaypal: 'new-address@example.net',
         amount: 100,
-        purpose: 'Urgent payment',
+        purpose: 'Urgent refund',
         confidence: 0.75,
         status: ActionStatus.BLOCKED,
         riskFlags: ['PAYEE_CHANGED', 'URGENCY'],

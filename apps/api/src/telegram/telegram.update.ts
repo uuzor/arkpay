@@ -3,7 +3,6 @@ import {
   Action,
   Command,
   Ctx,
-  Hears,
   On,
   Start,
   Update,
@@ -16,9 +15,6 @@ import { WorkspacesService } from '../auth/workspaces.service';
 import { VisionService } from '../llm/vision.service';
 import { ApprovalsService } from '../approvals/approvals.service';
 import { AuditService } from '../audit/audit.service';
-import { PayrollService } from '../payouts/payroll.service';
-import { isValidPeriod, periodInTimezone } from '../payouts/payroll-period';
-import { PayoutsService } from '../payouts/payouts.service';
 import { PipelineService } from '../pipeline/pipeline.service';
 import { SafetyService } from '../safety/safety.service';
 import {
@@ -47,8 +43,6 @@ export class TelegramUpdate {
     private readonly decision: DecisionService,
     private readonly telegram: TelegramService,
     private readonly approvals: ApprovalsService,
-    private readonly payouts: PayoutsService,
-    private readonly payroll: PayrollService,
     private readonly agent: AgentService,
     private readonly transcription: TranscriptionService,
     private readonly vision: VisionService,
@@ -234,42 +228,10 @@ export class TelegramUpdate {
     await this.runAgent(ctx, 'List my scheduled jobs and their next run.');
   }
 
-  @Command('payroll')
-  async payrollPrep(@Ctx() ctx: Context): Promise<void> {
-    const workspaceId = await this.requireLink(ctx);
-    if (!workspaceId) return;
-    const arg = (this.messageText(ctx) ?? '')
-      .replace(/^\/payroll\s*/i, '')
-      .trim();
-    const period = arg || periodInTimezone(new Date(), 'UTC');
-    if (!isValidPeriod(period)) {
-      await ctx.reply('Usage: /payroll [YYYY-MM]');
-      return;
-    }
-    try {
-      const prepared = await this.payroll.prepare(period, {
-        preparedBy: 'telegram',
-        workspaceId,
-      });
-      if (!prepared.created || !prepared.batch) {
-        await ctx.reply(
-          `Payroll ${period} was already prepared (batch ${prepared.run.batchId}). Use /pending to resend the card.`,
-        );
-        return;
-      }
-      await this.telegram.sendBatchCard(
-        prepared.batch.batchId,
-        prepared.batch.excluded,
-      );
-      await ctx.reply(
-        `Payroll ${period} prepared: ${prepared.batch.included.length} recipient(s), total ${prepared.batch.currency} ${prepared.batch.total}. Approve the card to pay.`,
-      );
-    } catch (e) {
-      await ctx.reply(
-        `Could not prepare payroll ${period}: ${e instanceof Error ? e.message : String(e)}`,
-      );
-    }
-  }
+  // NOTE (Nov 2026 redesign): /payroll and "pay my team" are frozen for the
+  // solo-earner story. PayrollService, team-batch assembly and the HTTP twin
+  // keep working; the bot no longer showcases them, and the phrase flows to
+  // the agent like any other payout request.
 
   @Command('statement')
   async statement(@Ctx() ctx: Context): Promise<void> {
@@ -359,26 +321,6 @@ export class TelegramUpdate {
     }
   }
 
-  @Hears(/^(\/payteam|pay my team)$/i)
-  async payTeam(@Ctx() ctx: Context): Promise<void> {
-    const workspaceId = await this.requireLink(ctx);
-    if (!workspaceId) return;
-    try {
-      const result = await this.payouts.assembleTeamBatch({}, { workspaceId });
-      await this.telegram.sendBatchCard(result.batchId, result.excluded);
-      await ctx.reply(
-        `Team batch assembled: ${result.included.length} recipient(s), total ${result.currency} ${result.total}.` +
-          (result.excluded.length > 0
-            ? ` ${result.excluded.length} excluded (see card).`
-            : ''),
-      );
-    } catch (e) {
-      await ctx.reply(
-        `Could not assemble team batch: ${e instanceof Error ? e.message : String(e)}`,
-      );
-    }
-  }
-
   @Command('cancel')
   async cancel(@Ctx() ctx: Context): Promise<void> {
     await this.runAgent(ctx, 'cancel');
@@ -417,8 +359,6 @@ export class TelegramUpdate {
     this.logger.log(
       `text from ${ctx.from?.id ?? 'unknown'} (${text.length} chars): ${text.slice(0, 80)}`,
     );
-    // The dedicated pay-team listener owns this phrase.
-    if (/(pay my team|payteam|payroll)/i.test(text)) return;
     await this.runAgent(ctx, text);
   }
 

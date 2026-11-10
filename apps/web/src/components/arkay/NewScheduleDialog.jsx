@@ -7,7 +7,6 @@ import { cn } from "@/lib/utils";
 import { apiJson } from "@/lib/api";
 
 const KINDS = [
-  { value: "PAYROLL_PREPARE", label: "Payroll prep", hint: "Assemble the monthly team batch for review. Never sends." },
   { value: "INVOICE_REMINDERS", label: "Invoice reminders", hint: "Chase overdue invoices politely." },
   { value: "NOTIFY", label: "Notify", hint: "Send a Telegram note. Needs message text below." },
   { value: "AGENT_TASK", label: "Agent task (read-only)", hint: "The agent reasons over the prompt with money tools stripped and no saved history." },

@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import StatusPill from "@/components/arkay/StatusPill";
 import Money from "@/components/arkay/Money";
+import PayoutSheet from "@/components/arkay/PayoutSheet";
 import { ACTION_STATUS_FILTERS, actionTone, timeAgo } from "@/lib/actionShapes";
 import { payoutsInfinite } from "@/lib/queries";
 
@@ -18,6 +19,7 @@ export const Route = createFileRoute("/_authed/payouts")({
 
 function PayoutsPage() {
   const [statusFilter, setStatusFilter] = useState(null);
+  const [payoutId, setPayoutId] = useState(null);
 
   const singles = useInfiniteQuery(payoutsInfinite(statusFilter));
   const singleRows = (singles.data?.pages ?? []).flatMap((p) => p?.rows ?? []);
@@ -76,10 +78,13 @@ function PayoutsPage() {
                   const tone = actionTone(row.status);
                   return (
                     <li key={row.id}>
-                      <Link
-                        to="/payouts/$payoutId"
-                        params={{ payoutId: row.id }}
-                        className="grid grid-cols-1 gap-2 px-4 py-3 transition-colors hover:bg-fog/50 md:grid-cols-[minmax(0,1fr)_110px_130px_96px] md:items-center md:gap-3"
+                      <button
+                        type="button"
+                        onClick={() => setPayoutId(row.id)}
+                        className={cn(
+                          "grid w-full grid-cols-1 gap-2 px-4 py-3 text-left transition-colors hover:bg-fog/50 md:grid-cols-[minmax(0,1fr)_110px_130px_96px] md:items-center md:gap-3",
+                          payoutId === row.id && "bg-fog/60",
+                        )}
                       >
                         <div className="min-w-0">
                           <p className="truncate text-[13px] font-medium text-ink">{row.payeeName}</p>
@@ -98,7 +103,7 @@ function PayoutsPage() {
                         <div className="md:text-right">
                           <StatusPill status={tone.status} label={tone.label} />
                         </div>
-                      </Link>
+                      </button>
                     </li>
                   );
                 })}
@@ -116,6 +121,8 @@ function PayoutsPage() {
             ) : null}
           </>
         )}
+
+      <PayoutSheet payoutId={payoutId} open={Boolean(payoutId)} onOpenChange={(v) => !v && setPayoutId(null)} />
     </div>
   );
 }

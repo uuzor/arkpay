@@ -117,7 +117,8 @@ function OverviewPage() {
             </p>
           </div>
           <Link
-            to="/approvals"
+            to="/inbox"
+            search={{ tab: "approvals" }}
             className="inline-flex items-center gap-1.5 rounded-xl bg-ink px-3.5 py-2 text-[12.5px] font-semibold text-paper"
           >
             Review approvals <ArrowRight className="h-3.5 w-3.5" />
@@ -208,7 +209,8 @@ function OverviewPage() {
               {pendingRows.slice(0, 4).map((row) => (
                 <Link
                   key={row.id}
-                  to="/approvals"
+                  to="/inbox"
+                  search={{ tab: "approvals" }}
                   className="block rounded-lg border border-mist/60 p-2.5 transition-colors hover:border-mist"
                 >
                   <div className="flex items-center justify-between gap-2">
@@ -222,7 +224,8 @@ function OverviewPage() {
                 </Link>
               ))}
               <Link
-                to="/approvals"
+                to="/inbox"
+                search={{ tab: "approvals" }}
                 className="flex items-center justify-between rounded-lg bg-fog px-2.5 py-2 text-[11.5px] font-medium text-ink"
               >
                 Open approval queue <ArrowRight className="h-3 w-3" />
@@ -262,7 +265,7 @@ function OverviewPage() {
               <div className="flex justify-between"><span>Global/day</span><strong>{config.globalDailyCap}</strong></div>
               <div className="flex justify-between"><span>Invoice max</span><strong>{config.invoiceMaxAmount}</strong></div>
               <div className="flex justify-between"><span>Auto-approve</span><strong>{config.autoApproveMaxAmount}</strong></div>
-              <Link to="/rules" className="mt-2 inline-flex items-center gap-1 font-medium text-graphite hover:text-ink">
+              <Link to="/settings" search={{ tab: "policy" }} className="mt-2 inline-flex items-center gap-1 font-medium text-graphite hover:text-ink">
                 View policy <ArrowUpRight className="h-3 w-3" />
               </Link>
             </div>

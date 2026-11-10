@@ -1,7 +1,6 @@
 import { useState } from "react";
-import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft } from "lucide-react";
+import DetailSheet from "@/components/arkay/DetailSheet";
 import StatusPill from "@/components/arkay/StatusPill";
 import RiskChip from "@/components/arkay/RiskChip";
 import Money from "@/components/arkay/Money";
@@ -9,37 +8,33 @@ import ApprovalDrawer from "@/components/arkay/ApprovalDrawer";
 import { actionTone, riskLabel, riskType, summarizeJson, timeAgo } from "@/lib/actionShapes";
 import { invoiceDetailQuery } from "@/lib/queries";
 
-export const Route = createFileRoute("/_authed/invoices_/$invoiceId")({
-  head: () => ({ meta: [{ title: "Invoice · Arkay" }] }),
-  component: InvoiceDetailPage,
-});
-
-function InvoiceDetailPage() {
-  const { invoiceId } = Route.useParams();
+export default function InvoiceSheet({ invoiceId, open, onOpenChange }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const { data, isLoading, isError, error } = useQuery(invoiceDetailQuery(invoiceId));
+  const { data, isLoading, isError, error } = useQuery({
+    ...invoiceDetailQuery(invoiceId),
+    enabled: open && Boolean(invoiceId),
+  });
 
   if (isLoading) {
     return (
-      <div className="space-y-4">
+      <DetailSheet open={open} onOpenChange={onOpenChange} title="Invoice">
         <div className="h-36 animate-pulse rounded-xl bg-fog" />
         <div className="h-64 animate-pulse rounded-xl bg-fog" />
-      </div>
+      </DetailSheet>
     );
   }
 
   if (isError || !data?.action) {
     const notFound = error?.status === 404;
     return (
-      <div className="rounded-xl border border-mist/70 bg-paper px-4 py-12 text-center">
-        <p className="text-[14px] font-semibold text-ink">{notFound ? "Invoice not found" : "Could not load this invoice"}</p>
-        <p className="mt-1 text-[12px] text-pewter">
-          {notFound ? "It may belong to another workspace." : (error?.message ?? "Unknown error.")}
-        </p>
-        <Link to="/invoices" className="mt-4 inline-block rounded-xl bg-ink px-3.5 py-2 text-[12.5px] font-semibold text-paper">
-          Back to invoices
-        </Link>
-      </div>
+      <DetailSheet open={open} onOpenChange={onOpenChange} title="Invoice">
+        <div className="rounded-xl border border-mist/70 bg-paper px-4 py-12 text-center">
+          <p className="text-[14px] font-semibold text-ink">{notFound ? "Invoice not found" : "Could not load this invoice"}</p>
+          <p className="mt-1 text-[12px] text-pewter">
+            {notFound ? "It may belong to another workspace." : (error?.message ?? "Unknown error.")}
+          </p>
+        </div>
+      </DetailSheet>
     );
   }
 
@@ -47,11 +42,7 @@ function InvoiceDetailPage() {
   const tone = actionTone(action.status);
 
   return (
-    <div className="space-y-4">
-      <Link to="/invoices" className="inline-flex items-center gap-1.5 text-[12px] font-medium text-graphite hover:text-ink">
-        <ArrowLeft className="h-3.5 w-3.5" /> All invoices
-      </Link>
-
+    <DetailSheet open={open} onOpenChange={onOpenChange} title={action.paypalRef ?? "Invoice"}>
       <div className="rounded-xl border border-mist/70 bg-paper">
         <div className="flex flex-wrap items-start justify-between gap-4 border-b border-mist/60 px-4 py-4 sm:px-5">
           <div className="min-w-0">
@@ -83,14 +74,10 @@ function InvoiceDetailPage() {
           >
             Open approval trace
           </button>
-          {action.emailId ? (
-            <Link
-              to="/requests/$requestId"
-              params={{ requestId: action.emailId }}
-              className="rounded-xl px-3 py-2 text-[12.5px] font-medium text-graphite hover:bg-fog"
-            >
-              Source email →
-            </Link>
+          {action.email ? (
+            <span className="px-3 py-2 text-[12px] text-pewter">
+              Source: {action.email.from} — {action.email.subject}
+            </span>
           ) : null}
         </div>
       </div>
@@ -152,6 +139,6 @@ function InvoiceDetailPage() {
       </div>
 
       <ApprovalDrawer actionId={invoiceId} open={drawerOpen} onOpenChange={setDrawerOpen} />
-    </div>
+    </DetailSheet>
   );
 }

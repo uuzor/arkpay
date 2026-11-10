@@ -28,16 +28,18 @@ needed.
 
 What you can do without connecting anything:
 
-- **Approvals** — approve seeded invoice/payout drafts, then execute.
-  Invoices execute **live** against the PayPal sandbox (you'll get a real
-  `INV2-…` ref); payouts refuse honestly with `demo_readonly` so shared demo
-  funds never move.
-- **Audit** — trace any action end to end (created → approved → executed).
-- **Safety** — policy rules, caps, and the seeded blocked fraud payout
-  (`PAYEE_CHANGED` + urgency, no approve button).
+- **Inbox** — emails and the approval queue in tabs; seeded invoice/refund
+  drafts approve and execute here. Invoices execute **live** against the
+  PayPal sandbox (you'll get a real `INV2-…` ref); payouts refuse honestly
+  with `demo_readonly` so shared demo funds never move.
+- **Money in** — invoices, retainers and disputes in tabs; rows open beside
+  the list instead of new pages.
+- **Activity** — trace any action end to end (created → approved → executed).
+- **Settings → Policy** — policy rules, caps, and the seeded blocked fraud
+  refund (`PAYEE_CHANGED` + urgency, no approve button).
 - **Agent chat** (right-side bar) — balances, spend, pending queue, and
-  "send invoice to …" drafts that land in Approvals. Runs on Muse Wonder.
-- **Requests / Contacts / Schedules / Subscriptions / Disputes** — seeded rows to browse.
+  "send invoice to …" drafts that land in the Inbox. Runs on Muse Wonder.
+- **Contacts / Schedules / Payouts** — seeded rows to browse.
 - **Voice + vision** — pair Telegram via the dashboard link code, then send a
   voice note (Muse Voice Transcribe) or receipt photo (Spark vision) to get a
   draft + approval card.
@@ -91,7 +93,6 @@ image files, or use:
 /emails Ada    search stored email
 /invoice       create an invoice draft (then approve the card)
 /schedules     list scheduled jobs and next runs
-/payroll       prepare this month's STAFF payroll batch
 /followup      remind a payer about an invoice
 /statement     PDF statement for this month
 /safety        Payment Safety Engine policy + limits
@@ -143,7 +144,8 @@ Schedules are rows, not hardcoded timers:
 - `ScheduleRun` records every occurrence with started/finished time, status,
   result or error.
 
-Seeded jobs are **Monthly payroll prep** and **Invoice follow-up scan**. Add
+Seeded jobs are **Invoice follow-up scan** (plus a legacy payroll-prep seed
+that still runs server-side but is no longer surfaced in the product). Add
 another scheduled task with `POST /schedules`, pause/resume with
 `PATCH /schedules/:id`, and run immediately with `POST /schedules/:id/run`.
 
@@ -152,9 +154,6 @@ pnpm --filter @arkpay/api test:scheduler
 pnpm --filter @arkpay/api test:scheduler:e2e
 pnpm --filter @arkpay/api test:payouts:mock   # state machine, PayPal stub
 ```
-
-Payroll is prepared with `POST /payroll/prepare` or Telegram `/payroll`;
-`PayrollRun.period` plus a Postgres advisory lock make it idempotent.
 
 ## Status
 
