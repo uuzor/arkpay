@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   MEMORY_KEY_HINTS,
+  buildMemoryCapturePrompt,
   buildScheduleCreate,
   collectNonActionResults,
+  daysOverdue,
   describeActionResult,
   describeNonActionResults,
   hasActionActivity,
@@ -15,8 +17,12 @@ import {
   normalizeMemoryValue,
   parseDraftFollowUp,
   parseInvoiceFirstTurn,
+  parseMemoryCapture,
   selectHistoryBudget,
+  summarizeDunning,
   summarizeEmptyResult,
+  summarizeScamCheck,
+  verdictClient,
 } from './agent-replies';
 
 test('parseDraftFollowUp extracts name + purpose from a follow-up fragment', () => {
@@ -510,4 +516,89 @@ test('describeNonActionResults names subscription/dispute reads', () => {
   assert.match(text ?? '', /Subscription report/);
   assert.match(text ?? '', /Disputes/);
   assert.match(text ?? '', /Dispute details/);
+});
+
+test('describeNonActionResults names the earner brief tools', () => {
+  const text = describeNonActionResults([
+    { toolName: 'verify_client', output: { verdict: 'new' } },
+    { toolName: 'scam_check', output: { summary: 'ok' } },
+    { toolName: 'dunning_brief', output: { overdue: [] } },
+  ]);
+  assert.match(text ?? '', /Client check/);
+  assert.match(text ?? '', /Scam check/);
+  assert.match(text ?? '', /Overdue list/);
+});
+
+test('buildMemoryCapturePrompt carries the turn and known memories', () => {
+  const prompt = buildMemoryCapturePrompt('I bill in USD', 'Noted!', [
+    { key: 'user_name', value: 'Ada' },
+  ]);
+  assert.match(prompt, /I bill in USD/);
+  assert.match(prompt, /user_name: Ada/);
+  assert.match(prompt, /JSON array only/);
+});
+
+test('parseMemoryCapture keeps valid entries, caps at 3, never throws', () => {
+  assert.deepStrictEqual(parseMemoryCapture('[{"key": "a", "value": "b"}]'), [
+    { key: 'a', value: 'b' },
+  ]);
+  assert.deepStrictEqual(
+    parseMemoryCapture('Sure! [{"key": "a", "value": "b"}, {"k": 1}, {"key": "", "value": "x"}] done'),
+    [{ key: 'a', value: 'b' }],
+  );
+  assert.deepStrictEqual(
+    parseMemoryCapture('[{"key":"1","value":"v"},{"key":"2","value":"v"},{"key":"3","value":"v"},{"key":"4","value":"v"}]').length,
+    3,
+  );
+  assert.deepStrictEqual(parseMemoryCapture('no json here'), []);
+  assert.deepStrictEqual(parseMemoryCapture('[{"key": unclosed'), []);
+  assert.deepStrictEqual(parseMemoryCapture(null), []);
+});
+
+test('verdictClient: new, known-good, caution', () => {
+  assert.equal(verdictClient({ found: false }).verdict, 'new');
+  const good = verdictClient({ found: true, payCount: 4 });
+  assert.equal(good.verdict, 'known-good');
+  assert.match(good.notes.join(' '), /4 payment/);
+  const caution = verdictClient({
+    found: true,
+    payCount: 2,
+    blockedCount: 1,
+    openDisputeCount: 1,
+    changedFlags: true,
+  });
+  assert.equal(caution.verdict, 'caution');
+  assert.equal(caution.notes.length, 4);
+});
+
+test('summarizeScamCheck is silent when clean, specific when not', () => {
+  assert.equal(
+    summarizeScamCheck({ flaggedActions: 0, atRiskSubs: 0, openDisputes: 0, newPayees: 0 }),
+    'Nothing suspicious in the latest activity.',
+  );
+  const text = summarizeScamCheck({ flaggedActions: 2, atRiskSubs: 0, openDisputes: 1, newPayees: 0 });
+  assert.match(text, /2 flagged action/);
+  assert.match(text, /1 open dispute/);
+});
+
+test('daysOverdue counts whole days past due, 0 otherwise', () => {
+  const now = new Date('2026-11-10T12:00:00Z');
+  assert.equal(daysOverdue('2026-11-01T00:00:00Z', now), 9);
+  assert.equal(daysOverdue('2026-11-10T11:00:00Z', now), 0);
+  assert.equal(daysOverdue('2026-11-12T00:00:00Z', now), 0);
+  assert.equal(daysOverdue('not-a-date', now), 0);
+});
+
+test('summarizeDunning totals the chase list', () => {
+  assert.equal(summarizeDunning([], 0), 'Nobody owes you money right now.');
+  const text = summarizeDunning(
+    [
+      { payeeName: 'Ada', amount: 450, currency: 'USD', daysOverdue: 14, reminders: 1 },
+      { payeeName: 'Bob', amount: 50, currency: 'USD', daysOverdue: 3, reminders: 0 },
+    ],
+    1,
+  );
+  assert.match(text, /2 overdue invoice\(s\) ≈ USD 500\.00/);
+  assert.match(text, /Ada.*14d overdue/);
+  assert.match(text, /1 subscription\(s\) past due/);
 });

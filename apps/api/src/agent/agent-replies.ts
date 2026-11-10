@@ -509,6 +509,185 @@ export function normalizeMemoryValue(value: unknown): string | null {
  * Prompt block for what the agent remembers about this user. Empty when no
  * facts are stored — never tell the model to invent memories.
  */
+/** Max facts auto-captured per turn — the extractor is capped, not the store. */
+export const MEMORY_CAPTURE_MAX = 3;
+
+export interface CapturedMemory {
+  key: string;
+  value: string;
+}
+
+/**
+ * Prompt for the post-turn extraction pass. Existing memories ride along so
+ * the extractor updates rather than duplicates; corrections ("actually I'm
+ * in Accra") come back under the same key and upsert over the old value.
+ */
+export function buildMemoryCapturePrompt(
+  userText: string,
+  assistantText: string,
+  existing: ChatMemoryEntry[],
+): string {
+  const known =
+    existing.length > 0
+      ? existing.map((m) => `- ${m.key}: ${m.value}`).join('\n')
+      : '(none yet)';
+  return [
+    'Extract durable facts about the user from this conversation turn.',
+    'Durable = true next week: name, business, currency, timezone, recurring clients, preferences, constraints.',
+    'NOT durable: one-off requests, amounts, greeting, anything already known (unless the user corrects it).',
+    'Reply with a JSON array only, at most 3 items: [{"key": "snake_case", "value": "short fact"}].',
+    'Empty array [] when nothing is worth keeping.',
+    '',
+    `Known memories:\n${known}`,
+    '',
+    `User: ${userText.slice(0, 800)}`,
+    `Assistant: ${assistantText.slice(0, 800)}`,
+  ].join('\n');
+}
+
+/**
+ * Defensive parse of the extractor reply: finds the first [...] JSON array
+ * and keeps entries with non-empty string key/value. Never throws — a
+ * malformed reply captures nothing.
+ */
+export function parseMemoryCapture(text: unknown): CapturedMemory[] {
+  if (typeof text !== 'string') return [];
+  const start = text.indexOf('[');
+  const end = text.lastIndexOf(']');
+  if (start < 0 || end <= start) return [];
+  try {
+    const parsed: unknown = JSON.parse(text.slice(start, end + 1));
+    if (!Array.isArray(parsed)) return [];
+    const out: CapturedMemory[] = [];
+    for (const item of parsed) {
+      if (
+        item &&
+        typeof item === 'object' &&
+        typeof (item as { key?: unknown }).key === 'string' &&
+        typeof (item as { value?: unknown }).value === 'string' &&
+        (item as { key: string }).key.trim() &&
+        (item as { value: string }).value.trim()
+      ) {
+        out.push({
+          key: (item as { key: string }).key.trim(),
+          value: (item as { value: string }).value.trim(),
+        });
+      }
+      if (out.length >= MEMORY_CAPTURE_MAX) break;
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Earner briefs — pure verdict/summary helpers. The tools gather rows from
+ * Postgres + PayPal; these decide what the rows mean. Tested, deterministic.
+ */
+
+export type ClientVerdict = 'new' | 'known-good' | 'caution';
+
+export interface ClientVerdictInput {
+  found: boolean;
+  payCount?: number;
+  blockedCount?: number;
+  openDisputeCount?: number;
+  changedFlags?: boolean;
+}
+
+export function verdictClient(input: ClientVerdictInput): {
+  verdict: ClientVerdict;
+  notes: string[];
+} {
+  if (!input.found) {
+    return { verdict: 'new', notes: ['first time we see this client'] };
+  }
+  const notes: string[] = [];
+  if ((input.payCount ?? 0) > 0) notes.push(`${input.payCount} payment(s) on record`);
+  if ((input.blockedCount ?? 0) > 0) {
+    notes.push(`${input.blockedCount} blocked action(s) — read before invoicing`);
+  }
+  if ((input.openDisputeCount ?? 0) > 0) {
+    notes.push(`${input.openDisputeCount} open dispute(s) against you`);
+  }
+  if (input.changedFlags) notes.push('PayPal details changed before — verify on the card');
+  const caution =
+    (input.blockedCount ?? 0) > 0 ||
+    (input.openDisputeCount ?? 0) > 0 ||
+    !!input.changedFlags;
+  return { verdict: caution ? 'caution' : 'known-good', notes };
+}
+
+export interface ScamCheckSections {
+  flaggedActions: number;
+  atRiskSubs: number;
+  openDisputes: number;
+  newPayees: number;
+}
+
+/** One honest line over the four scam-check sections. Never throws. */
+export function summarizeScamCheck(sections: ScamCheckSections): string {
+  const parts: string[] = [];
+  if (sections.flaggedActions > 0) {
+    parts.push(`${sections.flaggedActions} flagged action(s)`);
+  }
+  if (sections.atRiskSubs > 0) {
+    parts.push(`${sections.atRiskSubs} at-risk subscription(s)`);
+  }
+  if (sections.openDisputes > 0) {
+    parts.push(`${sections.openDisputes} open dispute(s)`);
+  }
+  if (sections.newPayees > 0) {
+    parts.push(`${sections.newPayees} brand-new payee(s)`);
+  }
+  return parts.length === 0
+    ? 'Nothing suspicious in the latest activity.'
+    : `Worth a look: ${parts.join(', ')}.`;
+}
+
+/** Whole days past a due date as of now; 0 when not overdue. */
+export function daysOverdue(due: Date | string, now: Date = new Date()): number {
+  const then = due instanceof Date ? due.getTime() : new Date(due).getTime();
+  if (!Number.isFinite(then)) return 0;
+  return Math.max(0, Math.floor((now.getTime() - then) / 86_400_000));
+}
+
+export interface DunningRow {
+  payeeName: string;
+  amount: number;
+  currency: string;
+  daysOverdue: number;
+  reminders: number;
+}
+
+export function summarizeDunning(
+  overdue: DunningRow[],
+  pastDueSubCount: number,
+): string {
+  if (overdue.length === 0 && pastDueSubCount === 0) {
+    return 'Nobody owes you money right now.';
+  }
+  const top = [...overdue]
+    .sort((a, b) => b.daysOverdue - a.daysOverdue)
+    .slice(0, 3)
+    .map(
+      (r) =>
+        `${r.payeeName} (${r.currency} ${r.amount.toFixed(2)}, ${r.daysOverdue}d overdue)`,
+    );
+  const bits: string[] = [];
+  if (overdue.length > 0) {
+    const total = overdue.reduce((s, r) => s + r.amount, 0);
+    bits.push(
+      `${overdue.length} overdue invoice(s) ≈ ${overdue[0].currency} ${total.toFixed(2)}: ${top.join('; ')}`,
+    );
+  }
+  if (pastDueSubCount > 0) {
+    bits.push(`${pastDueSubCount} subscription(s) past due`);
+  }
+  return bits.join('. ') + '.';
+}
+
 export function memoryBlockForPrompt(
   memories: ChatMemoryEntry[] | null | undefined,
 ): string {
@@ -573,6 +752,9 @@ const FRIENDLY_TOOL: Record<string, string> = {
   subscription_report: 'Subscription report',
   list_disputes: 'Disputes',
   get_dispute: 'Dispute details',
+  verify_client: 'Client check',
+  scam_check: 'Scam check',
+  dunning_brief: 'Overdue list',
 };
 
 function friendlyToolName(toolName: string): string {
