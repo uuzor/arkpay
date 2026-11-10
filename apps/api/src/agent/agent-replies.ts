@@ -84,7 +84,12 @@ export function describeActionResult(
 ): string | null {
   if (!output || typeof output !== 'object') return null;
   const out = output as ActionToolOutput;
-  if (toolName !== 'create_invoice_draft' && toolName !== 'request_payout') {
+  if (
+    toolName !== 'create_invoice_draft' &&
+    toolName !== 'request_payout' &&
+    toolName !== 'manage_subscription' &&
+    toolName !== 'respond_dispute'
+  ) {
     return typeof out.message === 'string' && out.message ? out.message : null;
   }
   if (!out.ok) {
@@ -96,7 +101,12 @@ export function describeActionResult(
   if (toolName === 'create_invoice_draft') {
     return `🧾 Draft created for ${facts}. Approve the card to send it.`;
   }
-  return `💸 Payout drafted for ${facts}. Nothing moves until you tap Pay.`;
+  if (toolName === 'request_payout') {
+    return `💸 Payout drafted for ${facts}. Nothing moves until you tap Pay.`;
+  }
+  // manage_subscription / respond_dispute already phrase their own outcome
+  // (op-specific verb + exact-text promise); reuse it verbatim.
+  return typeof out.message === 'string' && out.message ? out.message : null;
 }
 
 export type AgentScheduleKind =
@@ -558,6 +568,11 @@ const FRIENDLY_TOOL: Record<string, string> = {
   remember_fact: 'Saved memory',
   forget_fact: 'Saved memory',
   list_schedules: 'Schedules',
+  list_subscriptions: 'Subscriptions',
+  get_subscription: 'Subscription details',
+  subscription_report: 'Subscription report',
+  list_disputes: 'Disputes',
+  get_dispute: 'Dispute details',
 };
 
 function friendlyToolName(toolName: string): string {

@@ -79,8 +79,7 @@ export class TelegramService {
     // The primary button states the action AND the amount; callback data is
     // unchanged so handlers don't move.
     const money = `${action.currency} ${Number(action.amount).toFixed(2)}`;
-    const primary =
-      action.type === 'INVOICE' ? `🧾 Send ${money}` : `💸 Pay ${money}`;
+    const primary = this.primaryLabel(action.type, money);
     const keyboard = Markup.inlineKeyboard([
       [
         Markup.button.callback(primary, `approve:${action.id}`),
@@ -485,6 +484,33 @@ export class TelegramService {
    * sanitized sentence from the exact source email, or omitted. A banner
    * replaces the header once the card reaches a terminal state.
    */
+  /**
+   * The approve button names the exact consequence. Subscription and dispute
+   * actions are not payments, so they must not wear the Pay label.
+   */
+  private primaryLabel(type: string, money: string): string {
+    switch (type) {
+      case 'INVOICE':
+        return `🧾 Send ${money}`;
+      case 'SUBSCRIPTION_CANCEL':
+        return `🚫 Cancel subscription`;
+      case 'SUBSCRIPTION_SUSPEND':
+        return `⏸ Suspend subscription`;
+      case 'SUBSCRIPTION_ACTIVATE':
+        return `▶️ Resume subscription`;
+      case 'DISPUTE_MESSAGE':
+        return `✉️ Send reply`;
+      case 'DISPUTE_OFFER':
+        return `🤝 Offer ${money}`;
+      case 'DISPUTE_EVIDENCE':
+        return `📎 Submit evidence`;
+      case 'DISPUTE_ACCEPT_CLAIM':
+        return `⚖️ Accept claim ${money}`;
+      default:
+        return `💸 Pay ${money}`;
+    }
+  }
+
   private renderCard(
     action: {
       id: string;
@@ -516,11 +542,7 @@ export class TelegramService {
     const money = `${escapeHtml(action.currency)} ${Number(action.amount).toFixed(2)}`;
 
     const lines = [
-      banner
-        ? `<b>${escapeHtml(banner)}</b>`
-        : isInvoice
-          ? `🧾 <b>${escapeHtml(action.payeeName)} asked for an invoice</b>`
-          : `💸 <b>Pay ${escapeHtml(action.payeeName)}?</b>`,
+      banner ? `<b>${escapeHtml(banner)}</b>` : this.cardTitle(action),
       '',
       `<b>${money}</b>`,
       '',
@@ -555,6 +577,31 @@ export class TelegramService {
       `<code>${escapeHtml(action.id)}</code> · ${expiryText(action.expiresAt)}`,
     );
     return lines.join('\n');
+  }
+
+  /** Card headline names the exact consequence, like the button does. */
+  private cardTitle(action: { type: string; payeeName: string }): string {
+    const name = escapeHtml(action.payeeName);
+    switch (action.type) {
+      case 'INVOICE':
+        return `🧾 <b>${name} asked for an invoice</b>`;
+      case 'SUBSCRIPTION_CANCEL':
+        return `🚫 <b>Cancel ${name}'s subscription?</b>`;
+      case 'SUBSCRIPTION_SUSPEND':
+        return `⏸ <b>Suspend ${name}'s subscription?</b>`;
+      case 'SUBSCRIPTION_ACTIVATE':
+        return `▶️ <b>Resume ${name}'s subscription?</b>`;
+      case 'DISPUTE_MESSAGE':
+        return `✉️ <b>Reply to ${name}'s dispute?</b>`;
+      case 'DISPUTE_OFFER':
+        return `🤝 <b>Offer ${name} a resolution?</b>`;
+      case 'DISPUTE_EVIDENCE':
+        return `📎 <b>Submit evidence on ${name}'s dispute?</b>`;
+      case 'DISPUTE_ACCEPT_CLAIM':
+        return `⚖️ <b>Accept ${name}'s claim (refund)?</b>`;
+      default:
+        return `💸 <b>Pay ${name}?</b>`;
+    }
   }
 
   /**

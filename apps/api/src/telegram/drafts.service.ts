@@ -34,6 +34,14 @@ export interface DraftInput {
   sourceText?: string | null;
   /** Client key for idempotent creates (dashboard double-submit). */
   idempotencyKey?: string;
+  /**
+   * Known PayPal id (subscription / dispute) when it exists before approval
+   * — unlike invoices, where PayPal assigns it at execution. Lets webhooks
+   * and resume paths match the action immediately.
+   */
+  paypalRef?: string;
+  /** Extra structured payload merged into extractedJson (ids, op fields). */
+  extracted?: Record<string, unknown>;
 }
 
 export interface DraftResult {
@@ -86,8 +94,38 @@ export class DraftService {
     );
   }
 
+  async createSubscriptionAction(
+    op: 'cancel' | 'suspend' | 'activate',
+    input: DraftInput,
+    opts: { workspaceId: string; via: string; by: string },
+  ): Promise<DraftResult> {
+    const type =
+      op === 'cancel'
+        ? ActionType.SUBSCRIPTION_CANCEL
+        : op === 'suspend'
+          ? ActionType.SUBSCRIPTION_SUSPEND
+          : ActionType.SUBSCRIPTION_ACTIVATE;
+    return this.create(type, ContactKind.CLIENT, input, opts);
+  }
+
+  async createDisputeAction(
+    op: 'message' | 'offer' | 'evidence' | 'accept',
+    input: DraftInput,
+    opts: { workspaceId: string; via: string; by: string },
+  ): Promise<DraftResult> {
+    const type =
+      op === 'message'
+        ? ActionType.DISPUTE_MESSAGE
+        : op === 'offer'
+          ? ActionType.DISPUTE_OFFER
+          : op === 'evidence'
+            ? ActionType.DISPUTE_EVIDENCE
+            : ActionType.DISPUTE_ACCEPT_CLAIM;
+    return this.create(type, ContactKind.CLIENT, input, opts);
+  }
+
   private async create(
-    type: 'INVOICE' | 'PAYOUT_SINGLE',
+    type: ActionType,
     contactKind: ContactKind,
     input: DraftInput,
     opts: { workspaceId: string; via: string; by: string },
@@ -175,7 +213,8 @@ export class DraftService {
         amount,
         currency,
         purpose,
-        extractedJson: { via: opts.via, by: opts.by },
+        paypalRef: input.paypalRef?.trim() || null,
+        extractedJson: { via: opts.via, by: opts.by, ...(input.extracted ?? {}) },
         riskFlags: verdict.flags,
         policyVersion: verdict.policyVersion,
         policyVerdict: verdict.verdict,

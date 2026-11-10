@@ -6,7 +6,7 @@ import ProblemSection from "@/components/landing/ProblemSection";
 import HowItWorks from "@/components/landing/HowItWorks";
 import ControlRoomSection from "@/components/landing/ControlRoomSection";
 import SafetySection from "@/components/landing/SafetySection";
-import PayrollSection from "@/components/landing/PayrollSection";
+import ChaseSection from "@/components/landing/ChaseSection";
 import PricingSection from "@/components/landing/PricingSection";
 import ClosingCTA from "@/components/landing/ClosingCTA";
 import SiteFooter from "@/components/landing/SiteFooter";
@@ -14,11 +14,11 @@ import SiteFooter from "@/components/landing/SiteFooter";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "ArkPay — the payments agent with a safety engine" },
+      { title: "ArkPay — get paid without the paperwork" },
       {
         name: "description",
         content:
-          "ArkPay is the payments agent with a safety engine, for businesses and freelancers: it reads a money request from email or chat, drafts the PayPal invoice or payout, and waits for one approval before executing — with policy caps, risk checks, idempotency, and a full audit trail.",
+          "ArkPay is the pocket finance office for freelancers: client emails become PayPal invoices with one phone tap, late payers get chased automatically, and disputes get drafted defenses — every step guarded by a safety engine with a full audit trail.",
       },
     ],
   }),
@@ -36,7 +36,7 @@ function LandingPage() {
         <HowItWorks />
         <ControlRoomSection />
         <SafetySection />
-        <PayrollSection />
+        <ChaseSection />
         <PricingSection />
         <ClosingCTA />
       </main>

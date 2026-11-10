@@ -473,3 +473,41 @@ test('describeNonActionResults shows facts instead of the canned greeting', () =
   assert.match(text ?? '', /couldn't phrase the answer/);
   assert.ok(!(text ?? '').includes("I'm here"));
 });
+
+test('describeActionResult reuses subscription/dispute tool messages verbatim', () => {
+  assert.equal(
+    describeActionResult('manage_subscription', {
+      ok: true,
+      message: 'Cancellation drafted and approval card sent.',
+    }),
+    'Cancellation drafted and approval card sent.',
+  );
+  assert.equal(
+    describeActionResult('respond_dispute', {
+      ok: true,
+      message: 'Reply drafted and approval card sent with the exact text.',
+    }),
+    'Reply drafted and approval card sent with the exact text.',
+  );
+  assert.equal(
+    describeActionResult('manage_subscription', {
+      ok: false,
+      message: 'Cannot cancel subscription I-1: it is CANCELLED.',
+    }),
+    'Cannot cancel subscription I-1: it is CANCELLED.',
+  );
+  assert.equal(describeActionResult('manage_subscription', null), null);
+});
+
+test('describeNonActionResults names subscription/dispute reads', () => {
+  const text = describeNonActionResults([
+    { toolName: 'list_subscriptions', output: { count: 3 } },
+    { toolName: 'subscription_report', output: { total: 3 } },
+    { toolName: 'list_disputes', output: { count: 1 } },
+    { toolName: 'get_dispute', output: { id: 'PP-1' } },
+  ]);
+  assert.match(text ?? '', /Subscriptions/);
+  assert.match(text ?? '', /Subscription report/);
+  assert.match(text ?? '', /Disputes/);
+  assert.match(text ?? '', /Dispute details/);
+});

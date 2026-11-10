@@ -14,6 +14,13 @@ export const ACTION_TYPE_FILTERS = [
   { value: "INVOICE", label: "Invoices" },
   { value: "PAYOUT_SINGLE", label: "Single payouts" },
   { value: "PAYOUT_BATCH", label: "Batch members" },
+  { value: "SUBSCRIPTION_CANCEL", label: "Sub. cancels" },
+  { value: "SUBSCRIPTION_SUSPEND", label: "Sub. suspends" },
+  { value: "SUBSCRIPTION_ACTIVATE", label: "Sub. resumes" },
+  { value: "DISPUTE_MESSAGE", label: "Dispute replies" },
+  { value: "DISPUTE_OFFER", label: "Dispute offers" },
+  { value: "DISPUTE_EVIDENCE", label: "Dispute evidence" },
+  { value: "DISPUTE_ACCEPT_CLAIM", label: "Claim accepts" },
 ];
 
 export const EMAIL_STATUS_FILTERS = [
@@ -78,6 +85,13 @@ const ACTION_TYPE_LABEL = {
   INVOICE: "invoice",
   PAYOUT_SINGLE: "payout",
   PAYOUT_BATCH: "batch payout",
+  SUBSCRIPTION_CANCEL: "subscription cancel",
+  SUBSCRIPTION_SUSPEND: "subscription suspend",
+  SUBSCRIPTION_ACTIVATE: "subscription resume",
+  DISPUTE_MESSAGE: "dispute reply",
+  DISPUTE_OFFER: "dispute offer",
+  DISPUTE_EVIDENCE: "dispute evidence",
+  DISPUTE_ACCEPT_CLAIM: "claim accept",
 };
 
 export function actionTypeLabel(type) {
@@ -145,6 +159,24 @@ export function expiryText(expiresAt) {
   return `Expires in ${Math.floor(hours / 24)}d`;
 }
 
+const MONEY_MOVING_TYPES = new Set([
+  "PAYOUT_SINGLE",
+  "PAYOUT_BATCH",
+  "DISPUTE_OFFER",
+  "DISPUTE_ACCEPT_CLAIM",
+]);
+
+const EXECUTE_LABEL = {
+  INVOICE: "Send invoice",
+  SUBSCRIPTION_CANCEL: "Cancel subscription",
+  SUBSCRIPTION_SUSPEND: "Suspend subscription",
+  SUBSCRIPTION_ACTIVATE: "Resume subscription",
+  DISPUTE_MESSAGE: "Send reply",
+  DISPUTE_OFFER: "Send offer",
+  DISPUTE_EVIDENCE: "Submit evidence",
+  DISPUTE_ACCEPT_CLAIM: "Accept claim",
+};
+
 /** Primary dashboard action for an approval row, or null when there is none. */
 export function primaryFor(action) {
   if (action.rawStatus === "APPROVED") {
@@ -153,11 +185,17 @@ export function primaryFor(action) {
     }
     return {
       kind: "execute",
-      label: action.rawType === "INVOICE" ? "Send invoice" : `Pay ${action.currency} ${action.amount}`,
+      label:
+        EXECUTE_LABEL[action.rawType] ??
+        `Pay ${action.currency} ${action.amount}`,
     };
   }
-  if (action.rawStatus === "FAILED" && action.rawType === "INVOICE") {
-    return { kind: "execute", label: "Retry invoice" };
+  if (action.rawStatus === "FAILED" && !MONEY_MOVING_TYPES.has(action.rawType)) {
+    const label = EXECUTE_LABEL[action.rawType];
+    return {
+      kind: "execute",
+      label: action.rawType === "INVOICE" ? "Retry invoice" : label ? `Retry: ${label.toLowerCase()}` : "Retry",
+    };
   }
   return null;
 }
@@ -226,9 +264,9 @@ export function hintFor(action) {
         ? "Batch members execute together — open details for the batch button."
         : null;
     case "FAILED":
-      return action.rawType === "INVOICE"
-        ? null
-        : "Failed payouts aren't retried — create a new action instead.";
+      return MONEY_MOVING_TYPES.has(action.rawType)
+        ? "Failed money-moving actions aren't retried — create a new action instead."
+        : null;
     case "BLOCKED":
       return action.safetySummary ?? "Blocked by the Payment Safety Engine.";
     case "EXECUTED":

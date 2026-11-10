@@ -1,10 +1,12 @@
 # ArkPay
 
-**Never type an invoice again. Just talk.**
+**Get paid without the paperwork.**
 
-*Read the request. Approve once. Pay safely on PayPal.*
+*The request is already in your inbox. Tap once, and it's invoiced, chased, and defended.*
 
-ArkPay is the AI payments agent for freelancers and micro-businesses. It reads money requests from email and chat, prepares the PayPal invoice or payout, gets one secure approval, and executes it, with fraud checks and a complete audit trail.
+ArkPay is the pocket finance office for freelancers getting paid. A client emails asking for an invoice; ArkPay reads it, drafts the PayPal invoice, and waits for one phone-tap approval before sending. Then it tracks the money through webhooks, chases late payers in your tone, and drafts your defense if a payment is disputed — every step guarded by a safety engine with a complete audit trail.
+
+One customer: the solo earner. Ada designs flyers in Lagos; her clients pay her over PayPal. ArkPay is how she never loses a billable moment to admin again.
 
 Built for the PayPal AI Hackathon. Deadline: **Nov 12, 2026, 12:00 PM PST (9:00 PM Lagos)**.
 
@@ -12,25 +14,26 @@ Built for the PayPal AI Hackathon. Deadline: **Nov 12, 2026, 12:00 PM PST (9:00 
 
 ## 1. The Problem
 
-Money requests live in unstructured chaos: emails, WhatsApp voice notes, Slack messages, screenshots of bank details. Freelancers and tiny businesses handle this by hand:
+Money owed to freelancers dies in unstructured chaos: emails, voice notes, chat messages. There is no finance team — every minute of admin is a minute not earning:
 
-- A client emails "send me the invoice for last month" and it sits for days.
-- A supplier emails payment details and you retype them into a payment form (and typos or fake changed details cost real money).
-- Late payers go unchased because following up feels awkward.
+- A client emails "send me the invoice for last month" and it sits for days while you do the actual work.
+- The same request arrives twice (email + chat) and the client gets billed twice — embarrassing and trust-burning.
+- Late payers go unchased because following up feels awkward, so real money quietly never arrives.
+- A buyer opens a PayPal dispute and the 20-day clock starts while you're busy; miss it and you lose by default.
 
-Invoicing software assumes you already entered the data. Nobody owns the layer *before* the invoice exists.
+Invoicing software assumes you already entered the data. Nobody owns the layer *before* the invoice exists — or the chase *after* it's sent.
 
 ## 2. The Solution
 
 ArkPay is an agent that lives where you already talk.
 
 1. **Listens** to your inbox (Gmail first).
-2. **Understands** each email: is someone asking me to pay, asking me for an invoice, or is it noise?
+2. **Understands** each email: is a client asking for an invoice, is this money you owe, or is it noise?
 3. **Asks you** on Telegram: "Ada from Lagos Print asked for an invoice, $450 for flyers. Send it?" with Approve / Edit / Ignore buttons.
-4. **Acts** through PayPal: creates and sends the invoice, or pays the person via Payouts.
-5. **Closes the loop**: tracks the payment through webhooks, chases late payers, flags duplicates.
-6. **Remembers your people**: a smart contacts book of clients, suppliers and staff (PayPal email or ID, usual amounts, payment history), so the next request is handled faster and anything unusual stands out.
-7. **Runs payroll**: say "pay my team" and ArkPay assembles the batch from saved contacts, shows the total and recipients, and pays everyone after one approval. Monthly runs are prepared automatically and still wait for your tap.
+4. **Sends** through PayPal: creates and sends the invoice the moment you tap.
+5. **Chases** the loop: tracks payment through webhooks, reminds late payers in your tone, flags duplicates.
+6. **Defends** your money: when a buyer disputes, ArkPay gathers the context and drafts your reply, offer, or evidence — the exact text waits on an approval card before anything sends.
+7. **Remembers your people**: a smart contacts book of clients (PayPal email or ID, usual amounts, payment history), so the next request is handled faster, retainers are tracked, and anything unusual stands out.
 
 ## 3. Why the AI Is Essential (not decoration)
 
@@ -38,40 +41,42 @@ Remove the AI and the product stops working. The AI does the work no rule engine
 
 | AI job | What it does |
 |---|---|
-| Classification | Payment request vs invoice request vs spam vs casual chat |
+| Classification | Invoice request vs payout instruction vs payment confirmation vs spam vs casual chat |
 | Extraction | Amount, currency, person, purpose, due date from messy emails, signatures, attachments |
 | Risk reasoning | Spots duplicates, changed payee details, amounts that don't match history, suspicious urgency |
-| Drafting | Writes the invoice line items and a polite payment reminder in the user's tone |
-| Learning | Builds a profile: who you always pay, usual amounts, which clients pay late |
+| Drafting | Writes the invoice line items, a polite payment reminder in the user's tone, and dispute replies with evidence |
+| Learning | Builds a profile: usual amounts, which clients pay late, how you like chases worded |
 | Contact memory | Matches a name or email to a saved contact, auto-fills details, and notices when something about a known contact changes |
-| Payroll assembly | Turns "pay my team" into a checked batch with amounts pulled from history, flagging anyone who looks off |
+| Collection | Decides what to chase, when, and how firmly — and what the next step on a dispute should be |
 
 ## 4. PayPal Integration (central, not bolted on)
 
 - **PayPal Invoicing API**: create, send and track invoices from extracted data
-- **PayPal Payouts**: pay suppliers, contractors and staff after approval, both single payments and batch payouts
-- **Webhooks**: payment received, invoice viewed, payout success or failure, which drives reconciliation and reminders
+- **PayPal Payouts**: client refunds and contractor payments after approval (single + batch where the sender country is eligible; the core loop never depends on it)
+- **PayPal Subscriptions**: manage recurring client billing — portfolio report (MRR, past-due, at-risk), approval-gated cancel/suspend/resume, failed-payment dunning signals over webhooks
+- **PayPal Disputes**: full seller-side lifecycle — list, stage-aware suggested next step, LLM-drafted replies, approval-gated message/offer/evidence/claim-accept with HATEOAS legality checks, resolution tracking over webhooks
+- **Webhooks**: payment received, payout success or failure, subscription lifecycle + failed payments, dispute opened/resolved — driving reconciliation, reminders and dunning
 - **Agent Toolkit / MCP server** (optional): let the agent call PayPal actions through the official tool layer. Verify in the PayPal docs which is easier to demo.
 
 All built on the free PayPal sandbox.
 
 ## 5. The Startup Angle
 
-**Market:** 400M+ small businesses and freelancers globally, most without proper finance software. Highly underserved in Nigeria and across Africa, where requests flow over email and WhatsApp and formal invoicing is rare. *(Verify figures before putting them in the final deck.)*
+**Market:** 150M+ freelancers globally, most without proper finance software — and no finance team at all. Highly underserved in Nigeria and across Africa, where client requests flow over email and chat and formal invoicing is rare. *(Verify figures before putting them in the final deck.)*
 
-**Wedge:** Start with the one painful moment, "someone emailed me about money", then expand into a complete payments agent for micro-businesses.
+**Wedge:** One customer, one loop: the solo earner getting paid. Start with "a client emailed me about money" → tap → invoiced, chased, defended. Teams, payroll and supplier runs are explicitly *not* this product — that's a different customer with a different office.
 
 **Moat:**
-- *Learns you*: over time the routine payments within your limits are auto-approved, and approvals shrink to only the weird ones. Switching cost grows with every month of history.
-- *Contacts and payroll*: the saved people book makes every future request faster and safer, and recurring staff pay turns ArkPay from an occasional tool into something used every month.
-- *Channel-agnostic*: email today, WhatsApp voice notes, Slack and screenshots next. Zapier-style tools can't read intent across channels.
-- *Payment Safety Engine*: spending rules, approval locking, fraud flags and an audit log make people comfortable letting an agent move money.
+- *Learns you*: usual amounts, which clients pay late, how you like chases worded. Switching cost grows with every month of history.
+- *Client book + retainers*: the saved people book makes every future request faster and safer, and monthly retainer tracking turns ArkPay from an occasional tool into something used every week.
+- *Channel-native*: email today, Telegram voice notes next (WhatsApp Business after). Zapier-style tools can't read intent across channels.
+- *Payment Safety Engine*: approval locking, fraud flags and an audit log make a solo operator comfortable letting an agent touch their money.
 
-**Payment rails:** PayPal is the rail for the hackathon and for cross-border use. PayPal Payouts is not open to senders in every country, and Nigeria is not on PayPal's current Payouts country list, so the Nigeria roadmap adds local payment rails alongside PayPal. The agent, the Payment Safety Engine and the approval layer are built to be rail-agnostic.
+**Payment rails:** PayPal is the rail for the hackathon and for cross-border use. Receiving (invoicing, reminders, dispute defense) works for a Nigerian freelancer today; PayPal Payouts is not open to senders in every country, so sender-side depth waits on eligibility and local rails (e.g. Paystack, to be validated). The agent, the Payment Safety Engine and the approval layer are built to be rail-agnostic.
 
-**Business model:** Free tier (a few actions per month), subscription for unlimited use, plus a small fee on automated payouts.
+**Business model:** Free tier (a few actions per month), subscription for unlimited use. No cut of the invoices you send.
 
-**Vision:** Every micro-business money request: read, approved, paid, and proven safe.
+**Vision:** Every freelancer's money owed: invoiced, chased, collected, and proven safe.
 
 ## 6. Payment Safety Engine (judges will ask)
 
@@ -133,11 +138,11 @@ The hackathon build proves the core loop: money requests in, one approval, PayPa
 - **Recurring billing:** when a client says "I'll pay monthly," the agent sets up a PayPal subscription instead of someone chasing every month.
 
 **Phase 2: Run the money, not just the requests**
-- **Receipt to reimbursement:** staff photograph a receipt, the AI reads and categorizes it, and ArkPay reimburses them through Payouts after approval.
-- **Cash-flow check:** before payroll, ask "can I afford this month?" and the agent compares outstanding invoices against upcoming payments and warns about gaps.
+- **Expense tracking:** photograph a receipt, the AI reads and categorizes it against your income for the month.
+- **Cash-flow check:** ask "can I afford this month?" and the agent compares outstanding invoices against upcoming bills and warns about gaps.
 
 **Phase 3: Protect and expand**
-- **Dispute defender:** when a customer opens a PayPal dispute, the agent gathers the order evidence, drafts the response, and asks you to approve it.
+- **Dispute defender:** ✅ shipped (Nov 7) — when a customer opens a PayPal dispute, the agent gathers the context, drafts the response, and asks you to approve the exact text before anything sends. Offer, evidence and claim-acceptance included.
 - **More channels:** Slack and other chat apps as extra places to ask for and approve payments.
 - **Local payment rails:** add local rails (for example Paystack for Nigeria, to be validated) so Nigerian businesses can collect and pay without depending on PayPal Payouts eligibility.
 
@@ -180,21 +185,21 @@ Aim to finish **Nov 11** and keep Nov 12 morning as pure buffer.
 | 11 | Tue Nov 10 | Polish, edge cases, optional Slack input. Write README and Devpost text. | Fresh-account run-through works |
 | 12 | Wed Nov 11 | Record the 3-minute demo, upload it publicly to YouTube, submit on Devpost. | Submitted with hours to spare |
 
-If you slip, cut in this order: Slack, monthly scheduling, learning and auto-approve, dashboard polish. **Never cut:** the Telegram approval, the PayPal action, the webhook loop, simple bulk pay.
+If you slip, cut in this order: Slack, scheduling detail, learning and auto-approve, payroll depth, dashboard polish. **Never cut:** the Telegram approval, the invoice send, the chase, the webhook loop, the dispute draft.
 
 ## 10. The 3-Minute Demo (hard cap, judges won't watch past it)
 
-- **0:00 to 0:20**: The problem. Show a messy inbox and say "money requests live here, and nobody owns this layer."
-- **0:20 to 1:10**: Email arrives asking for an invoice. Telegram pings, the agent recognizes the saved contact. Tap Approve. Show the PayPal invoice appear.
-- **1:10 to 1:50**: Supplier email asks for payment, you approve, payout executes. Then type "pay my team": ArkPay shows the batch total and recipients, you approve once, everyone gets paid.
-- **1:50 to 2:20**: A known vendor emails that their PayPal address has changed and asks you to pay the new one. The Payment Safety Engine stops it with a visible label: "Blocked: payee PayPal email changed, manual approval required." Then show the audit entry: what the agent read, the risk it flagged, and that no money moved. This is the moment judges remember.
-- **2:20 to 2:45**: Webhook fires, the invoice gets paid, the dashboard updates.
-- **2:45 to 3:00**: The vision: every micro-business money request, read, approved, paid and proven safe, starting in Lagos.
+- **0:00 to 0:20**: The problem. One face: Ada, freelance designer in Lagos. Show her messy inbox and say "money owed to her lives here, and nobody owns this layer."
+- **0:20 to 1:10**: Client email arrives asking for an invoice. Telegram pings, the agent recognizes the saved contact. Tap Approve. Show the PayPal invoice appear as SENT.
+- **1:10 to 1:50**: Fourteen days later (seeded overdue invoice): ArkPay drafted the chase in her tone — approve, reminder sent. Then the buyer disputes: the agent gathers the context and drafts her reply with the exact text on the card. Approve — defense sent.
+- **1:50 to 2:20**: A "client" emails asking for a refund to a brand-new PayPal address. The Payment Safety Engine stops it with a visible label: "Blocked: payee PayPal email changed, manual approval required." Then show the audit entry: what the agent read, the risk it flagged, and that no money moved. This is the moment judges remember.
+- **2:20 to 2:45**: Webhook fires, an invoice gets paid, the dashboard's owed/overdue/collected updates.
+- **2:45 to 3:00**: The vision: every freelancer's money owed — invoiced, chased, collected, and proven safe, starting in Lagos.
 
 ## 11. Devpost Checklist
 
 - [ ] Working prototype in the sandbox
-- [ ] Meaningful PayPal integration (Invoicing, single and batch Payouts, Webhooks)
+- [ ] Meaningful PayPal integration (Invoicing, reminders, Disputes, Subscriptions, Webhooks — plus Payouts where eligible)
 - [ ] Contacts book working in the demo
 - [ ] AI central to the workflow
 - [ ] README: setup, architecture diagram, how to test
@@ -210,7 +215,7 @@ If you slip, cut in this order: Slack, monthly scheduling, learning and auto-app
 |---|---|
 | WhatsApp Business API needs approval and setup | Use Telegram for the MVP, show WhatsApp as the roadmap |
 | Gmail OAuth verification | Stay in testing mode with your own account and test users |
-| Payouts sandbox quirks | Test on Day 1 and 6, keep a fallback of invoice-only demo |
+| Payouts sandbox quirks | The invoice → chase → dispute loop never depends on Payouts; sender-side stays a secondary path |
 | AI misreads an email | Human approval by default, show the confidence score on every card |
 | Batch payout errors | Cap batch size and total, always preview recipients, idempotency keys |
 | Scope creep | The cut-order list in section 9 |

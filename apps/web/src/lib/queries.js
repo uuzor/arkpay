@@ -234,6 +234,46 @@ export function contactDetailQuery(id) {
   });
 }
 
+export function billingSubscriptionsQuery(status = null) {
+  const params = new URLSearchParams();
+  if (status) params.set("status", status);
+  const qs = params.toString();
+  return queryOptions({
+    queryKey: ["billing", "subscriptions", status],
+    queryFn: () => apiJson(`/billing/subscriptions${qs ? `?${qs}` : ""}`),
+    staleTime: 15_000,
+  });
+}
+
+export function billingSubscriptionDetailQuery(id) {
+  return queryOptions({
+    queryKey: ["billing", "subscriptions", "detail", id],
+    queryFn: () => apiJson(`/billing/subscriptions/${encodeURIComponent(id)}`),
+    staleTime: 10_000,
+    enabled: Boolean(id),
+  });
+}
+
+export function billingDisputesQuery(state = null) {
+  const params = new URLSearchParams();
+  if (state) params.set("state", state);
+  const qs = params.toString();
+  return queryOptions({
+    queryKey: ["billing", "disputes", state],
+    queryFn: () => apiJson(`/billing/disputes${qs ? `?${qs}` : ""}`),
+    staleTime: 15_000,
+  });
+}
+
+export function billingDisputeDetailQuery(id) {
+  return queryOptions({
+    queryKey: ["billing", "disputes", "detail", id],
+    queryFn: () => apiJson(`/billing/disputes/${encodeURIComponent(id)}`),
+    staleTime: 10_000,
+    enabled: Boolean(id),
+  });
+}
+
 export const overviewQuery = queryOptions({
   queryKey: ["overview"],
   queryFn: async () => {

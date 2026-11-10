@@ -19,9 +19,11 @@ import {
   PaypalPayoutsService,
   type PayoutBatch,
 } from '../paypal/paypal-payouts.service';
+import { PaypalDisputesService } from '../paypal/paypal-disputes.service';
+import { PaypalSubscriptionsService } from '../paypal/paypal-subscriptions.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SafetyService } from '../safety/safety.service';
-import type { SafetyVerdict } from '../safety/policy';
+import { typeMovesMoney, type SafetyVerdict } from '../safety/policy';
 import { computeActionHash } from './action-hash';
 
 export type ExecuteReason =
@@ -97,6 +99,8 @@ export class ApprovalsService {
     private readonly audit: AuditService,
     private readonly contacts: ContactsService,
     private readonly invoices: PaypalInvoicesService,
+    private readonly subscriptions: PaypalSubscriptionsService,
+    private readonly disputes: PaypalDisputesService,
     private readonly payouts: PaypalPayoutsService,
     private readonly safety: SafetyService,
   ) {}
@@ -177,10 +181,16 @@ export class ApprovalsService {
       };
     }
 
-    // A failed payout is never blind-retried: PayPal has accepted a second
-    // batch with the same sender_batch_id in the sandbox, so a lost response
-    // could otherwise double-pay. The owner must create a new action.
-    if (action.status === ActionStatus.FAILED && action.type !== ActionType.INVOICE) {
+    // A failed money-moving action is never blind-retried: PayPal has
+    // accepted a second batch with the same sender_batch_id in the sandbox,
+    // so a lost response could otherwise double-pay — and a lost dispute
+    // offer/acceptance could double-commit. The owner must create a new
+    // action. Invoices, subscription lifecycle and dispute messaging/evidence
+    // are idempotent reads-before-writes, so FAILED there is retryable.
+    if (
+      action.status === ActionStatus.FAILED &&
+      typeMovesMoney(action.type)
+    ) {
       await this.audit.log(actionId, 'EXECUTION_REFUSED', {
         reason: 'not_retryable',
         type: action.type,
@@ -189,7 +199,7 @@ export class ApprovalsService {
         ok: false,
         reason: 'not_retryable',
         detail:
-          'failed payouts are not retried automatically; create a new action',
+          'failed money-moving actions are not retried automatically; create a new action',
       };
     }
 
@@ -240,7 +250,12 @@ export class ApprovalsService {
           { via: 'execution' },
           tx,
         );
-        await this.checkCaps(tx, action.payeePaypal, amount, action.currency);
+        // Caps govern money OUT. Subscription lifecycle and dispute
+        // messaging/evidence move none, so they skip the cap check (Gate 2
+        // above already applied the same rule via movesMoney).
+        if (typeMovesMoney(action.type)) {
+          await this.checkCaps(tx, action.payeePaypal, amount, action.currency);
+        }
         const flipped = await tx.action.updateMany({
           where: {
             id: actionId,
@@ -295,7 +310,33 @@ export class ApprovalsService {
     if (action.type === ActionType.INVOICE) {
       return this.runInvoiceFlow(actionId, action, amount);
     }
-    return this.runPayoutSingleFlow(actionId, action, amount);
+    if (action.type === ActionType.PAYOUT_SINGLE) {
+      return this.runPayoutSingleFlow(actionId, action, amount);
+    }
+    if (
+      action.type === ActionType.SUBSCRIPTION_CANCEL ||
+      action.type === ActionType.SUBSCRIPTION_SUSPEND ||
+      action.type === ActionType.SUBSCRIPTION_ACTIVATE
+    ) {
+      return this.runSubscriptionFlow(actionId, action);
+    }
+    if (
+      action.type === ActionType.DISPUTE_MESSAGE ||
+      action.type === ActionType.DISPUTE_OFFER ||
+      action.type === ActionType.DISPUTE_EVIDENCE ||
+      action.type === ActionType.DISPUTE_ACCEPT_CLAIM
+    ) {
+      return this.runDisputeFlow(actionId, action, amount);
+    }
+    await this.audit.log(actionId, 'EXECUTION_REFUSED', {
+      reason: 'unsupported_type',
+      type: action.type,
+    });
+    return {
+      ok: false,
+      reason: 'unsupported_type',
+      detail: `no execution flow for ${action.type}`,
+    };
   }
 
   /**
@@ -492,6 +533,200 @@ export class ApprovalsService {
       await this.failPayout(actionId, { error: msg.slice(0, 500) });
       return { ok: false, reason: 'paypal_failed', detail: msg.slice(0, 300) };
     }
+  }
+
+  /**
+   * Subscription lifecycle execution: read-before-write against PayPal, so
+   * a retry after a lost response reconciles instead of double-acting.
+   * The subscription id is the paypalRef, set when the action was created.
+   */
+  private async runSubscriptionFlow(
+    actionId: string,
+    action: Action,
+  ): Promise<ExecuteResult> {
+    const subscriptionId = action.paypalRef;
+    if (!subscriptionId) {
+      await this.failPayout(actionId, { error: 'missing subscription id' });
+      return { ok: false, reason: 'paypal_failed', detail: 'missing subscription id' };
+    }
+    const target =
+      action.type === ActionType.SUBSCRIPTION_CANCEL
+        ? 'CANCELLED'
+        : action.type === ActionType.SUBSCRIPTION_SUSPEND
+          ? 'SUSPENDED'
+          : 'ACTIVE';
+    try {
+      const current = await this.subscriptions.getSubscription(
+        subscriptionId,
+        action.workspaceId,
+      );
+      if (current.status === target) {
+        await this.markExecuted(actionId, subscriptionId, { via: 'resume' });
+        this.logger.log(
+          `Executed ${actionId}: subscription ${subscriptionId} already ${target}`,
+        );
+        return { ok: true, reason: 'executed', paypalRef: subscriptionId };
+      }
+      const reason = action.purpose.slice(0, 200) || `ArkPay action ${action.id}`;
+      if (action.type === ActionType.SUBSCRIPTION_CANCEL) {
+        await this.subscriptions.cancelSubscription(
+          subscriptionId,
+          action.workspaceId,
+          reason,
+        );
+      } else if (action.type === ActionType.SUBSCRIPTION_SUSPEND) {
+        await this.subscriptions.suspendSubscription(
+          subscriptionId,
+          action.workspaceId,
+          reason,
+        );
+      } else {
+        await this.subscriptions.activateSubscription(
+          subscriptionId,
+          action.workspaceId,
+          reason,
+        );
+      }
+      await this.markExecuted(actionId, subscriptionId, {
+        from: current.status,
+        to: target,
+      });
+      this.logger.log(
+        `Executed ${actionId}: subscription ${subscriptionId} ${current.status} → ${target}`,
+      );
+      return { ok: true, reason: 'executed', paypalRef: subscriptionId };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      await this.failPayout(actionId, { error: msg.slice(0, 500) });
+      return { ok: false, reason: 'paypal_failed', detail: msg.slice(0, 300) };
+    }
+  }
+
+  /**
+   * Dispute response execution. Every op re-reads the dispute first: the
+   * HATEOAS links are the source of truth for what PayPal still allows
+   * (a stage change since approval fails the action instead of 422ing
+   * inside PayPal), and identical seller messages/evidence already present
+   * are treated as idempotent success for retries.
+   */
+  private async runDisputeFlow(
+    actionId: string,
+    action: Action,
+    amount: number,
+  ): Promise<ExecuteResult> {
+    const disputeId = action.paypalRef;
+    if (!disputeId) {
+      await this.failPayout(actionId, { error: 'missing dispute id' });
+      return { ok: false, reason: 'paypal_failed', detail: 'missing dispute id' };
+    }
+    try {
+      const dispute = await this.disputes.getDispute(
+        disputeId,
+        action.workspaceId,
+      );
+      const op = this.disputeOpOf(action.type);
+      const payload = (action.extractedJson ?? {}) as Record<string, unknown>;
+      if (op === 'message' && this.sellerMessagePresent(dispute, action.purpose)) {
+        await this.markExecuted(actionId, disputeId, { via: 'resume' });
+        return { ok: true, reason: 'executed', paypalRef: disputeId };
+      }
+      if (op === 'evidence') {
+        const evidenceType = String(payload.evidenceType ?? '');
+        if (
+          evidenceType &&
+          dispute.evidences.some(
+            (e) =>
+              e.source === 'SUBMITTED_BY_SELLER' &&
+              e.type === evidenceType &&
+              (e.notes ?? '') === (String(payload.notes ?? action.purpose)),
+          )
+        ) {
+          await this.markExecuted(actionId, disputeId, { via: 'resume' });
+          return { ok: true, reason: 'executed', paypalRef: disputeId };
+        }
+      }
+      if (op === 'message') {
+        await this.disputes.sendMessage(
+          disputeId,
+          action.workspaceId,
+          action.purpose,
+          dispute.links,
+        );
+      } else if (op === 'offer') {
+        await this.disputes.makeOffer(
+          disputeId,
+          action.workspaceId,
+          {
+            note: action.purpose,
+            offerType: String(
+              payload.offerType ?? 'REFUND',
+            ) as 'REFUND' | 'REFUND_WITH_RETURN' | 'REFUND_WITH_REPLACEMENT' | 'REPLACEMENT_WITHOUT_REFUND',
+            amount: amount.toFixed(2),
+            currency: action.currency,
+            ...(typeof payload.invoiceId === 'string' && payload.invoiceId
+              ? { invoiceId: payload.invoiceId }
+              : {}),
+          },
+          dispute.links,
+        );
+      } else if (op === 'evidence') {
+        await this.disputes.provideEvidence(
+          disputeId,
+          action.workspaceId,
+          {
+            evidenceType: String(payload.evidenceType ?? 'OTHER'),
+            notes: String(payload.notes ?? action.purpose),
+            ...(typeof payload.trackingNumber === 'string' && payload.trackingNumber
+              ? {
+                  trackingNumber: payload.trackingNumber,
+                  carrierName:
+                    typeof payload.carrierName === 'string'
+                      ? payload.carrierName
+                      : 'OTHER',
+                }
+              : {}),
+            ...(typeof payload.refundId === 'string' && payload.refundId
+              ? { refundId: payload.refundId }
+              : {}),
+          },
+          dispute.links,
+        );
+      } else {
+        await this.disputes.acceptClaim(
+          disputeId,
+          action.workspaceId,
+          action.purpose,
+          dispute.links,
+        );
+      }
+      await this.markExecuted(actionId, disputeId, { op });
+      this.logger.log(`Executed ${actionId}: dispute ${disputeId} ${op}`);
+      return { ok: true, reason: 'executed', paypalRef: disputeId };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      await this.failPayout(actionId, { error: msg.slice(0, 500) });
+      return { ok: false, reason: 'paypal_failed', detail: msg.slice(0, 300) };
+    }
+  }
+
+  private disputeOpOf(type: ActionType): 'message' | 'offer' | 'evidence' | 'accept' {
+    if (type === ActionType.DISPUTE_MESSAGE) return 'message';
+    if (type === ActionType.DISPUTE_OFFER) return 'offer';
+    if (type === ActionType.DISPUTE_EVIDENCE) return 'evidence';
+    return 'accept';
+  }
+
+  /** Our exact approved text already posted by the seller: a lost response, not new work. */
+  private sellerMessagePresent(
+    dispute: {
+      messages: Array<{ postedBy: string; content?: string }>;
+    },
+    purpose: string,
+  ): boolean {
+    return dispute.messages.some(
+      (m) =>
+        m.postedBy === 'SELLER' && (m.content ?? '').trim() === purpose.trim(),
+    );
   }
 
   /**
@@ -1216,7 +1451,14 @@ export class ApprovalsService {
           ...where,
           currency,
           status: { in: [ActionStatus.EXECUTING, ActionStatus.EXECUTED] },
-          type: { in: [ActionType.PAYOUT_SINGLE, ActionType.PAYOUT_BATCH] },
+          type: {
+            in: [
+              ActionType.PAYOUT_SINGLE,
+              ActionType.PAYOUT_BATCH,
+              ActionType.DISPUTE_OFFER,
+              ActionType.DISPUTE_ACCEPT_CLAIM,
+            ],
+          },
           updatedAt: { gte: dayStart },
         },
       });

@@ -70,12 +70,22 @@ const invoices = {
     throw new Error('invoice path not used');
   },
 };
+const neverPaypal = {
+  getSubscription: async () => {
+    throw new Error('PayPal must not be called');
+  },
+  getDispute: async () => {
+    throw new Error('PayPal must not be called');
+  },
+};
 const approvals = new ApprovalsService(
   prisma,
   config,
   audit,
   contacts,
   invoices,
+  neverPaypal,
+  neverPaypal,
   payouts,
   safety,
 );

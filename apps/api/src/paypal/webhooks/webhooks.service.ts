@@ -12,7 +12,8 @@ import { PaypalAuthService } from '../paypal-auth.service';
 
 /**
  * Explicit subscription list (PayPal takes names, not wildcards). Covers the
- * invoice lifecycle we notify on plus payout batch/item outcomes.
+ * invoice lifecycle we notify on, payout batch/item outcomes, subscription
+ * lifecycle + failed payments, and dispute open/resolve.
  */
 export const WEBHOOK_EVENT_TYPES = [
   // NOTE: INVOICING.INVOICE.VIEWED and .PARTIALLY_PAID look plausible but
@@ -34,6 +35,16 @@ export const WEBHOOK_EVENT_TYPES = [
   'PAYMENT.PAYOUTS-ITEM.REFUNDED',
   'PAYMENT.PAYOUTS-ITEM.HELD',
   'PAYMENT.PAYOUTS-ITEM.CANCELED',
+  'BILLING.SUBSCRIPTION.CREATED',
+  'BILLING.SUBSCRIPTION.ACTIVATED',
+  'BILLING.SUBSCRIPTION.UPDATED',
+  'BILLING.SUBSCRIPTION.SUSPENDED',
+  'BILLING.SUBSCRIPTION.CANCELLED',
+  'BILLING.SUBSCRIPTION.EXPIRED',
+  'BILLING.SUBSCRIPTION.PAYMENT.FAILED',
+  'CUSTOMER.DISPUTE.CREATED',
+  'CUSTOMER.DISPUTE.UPDATED',
+  'CUSTOMER.DISPUTE.RESOLVED',
 ];
 
 export type WebhookOutcome =
@@ -165,6 +176,10 @@ export class PaypalWebhooksService {
       ref = resource?.batch_header?.payout_batch_id;
     } else if (eventType.startsWith('PAYMENT.PAYOUTS-ITEM.')) {
       ref = resource?.payout_batch_id;
+    } else if (eventType.startsWith('BILLING.SUBSCRIPTION.')) {
+      ref = resource?.id;
+    } else if (eventType.startsWith('CUSTOMER.DISPUTE.')) {
+      ref = resource?.dispute_id;
     }
     if (!ref) return null;
     const action = await this.prisma.action.findFirst({
@@ -236,6 +251,10 @@ export class PaypalWebhooksService {
       attributed = await this.handlePayoutBatchEvent(eventType, resource);
     } else if (eventType.startsWith('PAYMENT.PAYOUTS-ITEM.')) {
       attributed = await this.handlePayoutItemEvent(eventType, resource);
+    } else if (eventType.startsWith('BILLING.SUBSCRIPTION.')) {
+      attributed = await this.handleSubscriptionEvent(eventType, resource);
+    } else if (eventType.startsWith('CUSTOMER.DISPUTE.')) {
+      attributed = await this.handleDisputeEvent(eventType, resource);
     } else {
       this.logger.log(`ignoring webhook type ${eventType}`);
       return false;
@@ -415,6 +434,127 @@ export class PaypalWebhooksService {
     }
     // SUCCEEDED/UNCLAIMED/etc: the batch summary covers them.
     return member?.workspaceId ?? null;
+  }
+
+  /**
+   * Subscription lifecycle inbound. Matches actions by paypalRef (the
+   * subscription id, stamped at creation). Terminal leaves adopt EXECUTING
+   * actions forward-only, like invoices; PAYMENT.FAILED is the dunning
+   * signal and always pings.
+   */
+  private async handleSubscriptionEvent(
+    eventType: string,
+    resource: any,
+  ): Promise<string | null> {
+    const subscriptionId: string | undefined = resource?.id;
+    if (!subscriptionId) {
+      this.logger.warn(`subscription webhook without id: ${eventType}`);
+      return null;
+    }
+    const leaf = eventType.split('.').pop() as string;
+    const actions = await this.prisma.action.findMany({
+      where: { paypalRef: String(subscriptionId) },
+    });
+    if (actions.length === 0) {
+      this.logger.warn(
+        `no action for subscription ${subscriptionId} (${eventType})`,
+      );
+      return null;
+    }
+    const status: string | undefined = resource?.status;
+    for (const action of actions) {
+      const target =
+        action.type === 'SUBSCRIPTION_CANCEL'
+          ? 'CANCELLED'
+          : action.type === 'SUBSCRIPTION_SUSPEND'
+            ? 'SUSPENDED'
+            : action.type === 'SUBSCRIPTION_ACTIVATE'
+              ? 'ACTIVE'
+              : null;
+      if (
+        target &&
+        status === target &&
+        action.status === ActionStatus.EXECUTING
+      ) {
+        await this.prisma.$transaction(async (tx) => {
+          await tx.action.updateMany({
+            where: { id: action.id, status: ActionStatus.EXECUTING },
+            data: { status: ActionStatus.EXECUTED },
+          });
+          await this.audit.log(
+            action.id,
+            `WEBHOOK_SUBSCRIPTION_${leaf}`,
+            { paypalRef: String(subscriptionId), status },
+            tx,
+          );
+        });
+      } else {
+        await this.audit.log(action.id, `WEBHOOK_SUBSCRIPTION_${leaf}`, {
+          paypalRef: String(subscriptionId),
+          status,
+        });
+      }
+      const who = action.payeeName || action.payeePaypal;
+      if (leaf === 'FAILED') {
+        this.analyzeAndNotify(
+          `PayPal event ${eventType}. A payment on ${who}'s subscription ${subscriptionId} failed. ArkPay action ${action.id} is ${action.status}. Suggest dunning: check card, retry, or suspend.`,
+          `⚠️ Payment failed on ${who}'s subscription ${subscriptionId}`,
+          action.workspaceId,
+        );
+      } else if (leaf === 'CANCELLED' || leaf === 'SUSPENDED' || leaf === 'EXPIRED') {
+        this.analyzeAndNotify(
+          `PayPal event ${eventType}. ${who}'s subscription ${subscriptionId} is now ${leaf.toLowerCase()}. ArkPay action ${action.id} is ${action.status}.`,
+          `🔔 ${who}'s subscription ${leaf.toLowerCase()} (${subscriptionId})`,
+          action.workspaceId,
+        );
+      }
+      // CREATED/ACTIVATED/UPDATED: audit trail only, no ping.
+    }
+    return actions[0]?.workspaceId ?? null;
+  }
+
+  /**
+   * Dispute inbound. Matches actions by paypalRef (the dispute id). Dispute
+   * actions complete synchronously at execution, so every leaf here is
+   * informational: RESOLVED pings with the outcome, CREATED pings only when
+   * we already track the dispute (fresh disputes surface via list_disputes).
+   */
+  private async handleDisputeEvent(
+    eventType: string,
+    resource: any,
+  ): Promise<string | null> {
+    const disputeId: string | undefined = resource?.dispute_id;
+    if (!disputeId) {
+      this.logger.warn(`dispute webhook without id: ${eventType}`);
+      return null;
+    }
+    const leaf = eventType.split('.').pop() as string;
+    const actions = await this.prisma.action.findMany({
+      where: { paypalRef: String(disputeId) },
+    });
+    if (actions.length === 0) {
+      this.logger.warn(`no action for dispute ${disputeId} (${eventType})`);
+      return null;
+    }
+    const outcome: string | undefined =
+      resource?.dispute_outcome?.outcome_code ??
+      resource?.dispute_outcome ??
+      resource?.status;
+    for (const action of actions) {
+      await this.audit.log(action.id, `WEBHOOK_DISPUTE_${leaf}`, {
+        paypalRef: String(disputeId),
+        outcome,
+      });
+      if (leaf === 'RESOLVED') {
+        const who = action.payeeName || action.payeePaypal;
+        this.analyzeAndNotify(
+          `PayPal event ${eventType}. The dispute ${disputeId} with ${who} resolved (${outcome ?? 'outcome unknown'}). ArkPay action ${action.id} is ${action.status}. Summarize what this means for the owner.`,
+          `⚖️ Dispute ${disputeId} resolved (${outcome ?? 'outcome unknown'})`,
+          action.workspaceId,
+        );
+      }
+    }
+    return actions[0]?.workspaceId ?? null;
   }
 
   /**

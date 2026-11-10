@@ -12,17 +12,17 @@ export default function Hero() {
         <div className="animate-fade-up">
           <span className="inline-flex items-center gap-2 rounded-[8px] border border-silver/70 bg-paper px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.14em] text-graphite">
             <span className="h-1.5 w-1.5 rounded-full bg-ember" />
-            AI payments agent
+            AI invoicing agent for freelancers
           </span>
 
           <h1 className="mt-6 font-dm text-[42px] font-semibold leading-[1.04] tracking-tight text-ink sm:text-[56px] lg:text-[64px]">
-            One shared place for every money request.
+            Get paid without the paperwork.
           </h1>
 
           <p className="mt-6 max-w-[540px] text-[18px] leading-[1.5] text-graphite">
-            ArkPay is the payments agent with a safety engine, for businesses and freelancers: it reads
-            a money request from email or chat, drafts the PayPal invoice or payout, and waits for one
-            approval before executing — with policy caps, risk checks, idempotency, and a full audit trail.
+            ArkPay is the pocket finance office for freelancers: a client emails asking for an invoice,
+            you tap once on your phone, and the PayPal invoice is sent, chased when late, and defended
+            if disputed — every step guarded by a safety engine with a full audit trail.
           </p>
 
           <div className="mt-8 flex flex-wrap items-center gap-3">

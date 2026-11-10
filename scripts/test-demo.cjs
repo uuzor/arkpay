@@ -137,7 +137,7 @@ async function main() {
           purpose: 'Demo gate probe invoice',
           extractedJson: { kind: 'INVOICE_REQUEST', confidence: 1 },
           riskFlags: [],
-          policyVersion: 'arkpay-policy-2026-11-04',
+          policyVersion: 'arkpay-policy-2026-11-07',
           policyVerdict: 'ALLOW',
           confidence: 1,
           actionHash: computeActionHash({

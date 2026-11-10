@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist-billing",
+    "incremental": false,
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": ["src/paypal/billing-analysis.ts", "src/paypal/billing-analysis.spec.ts"]
+}

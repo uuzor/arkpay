@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/AuthContext";
 import {
   approvalsQuery,
+  billingDisputesQuery,
   overviewQuery,
   policyQuery,
   workspaceQuery,
@@ -53,6 +54,7 @@ function OverviewPage() {
   const { data: workspace } = useQuery(workspaceQuery);
   const { data: policy } = useQuery(policyQuery);
   const { data: pending } = useQuery(approvalsQuery("PENDING_APPROVAL", 5));
+  const { data: disputes } = useQuery(billingDisputesQuery());
 
   const missing = [
     !workspace?.gmailConnected && "Gmail",
@@ -84,7 +86,9 @@ function OverviewPage() {
 
   const rows = data?.recent ?? [];
   const pendingRows = pending?.rows ?? data?.pendingRows ?? [];
-  const nextPayroll = data?.nextPayroll;
+  const openDisputes = (disputes?.rows ?? []).filter(
+    (d) => d.state !== "RESOLVED" && d.status !== "RESOLVED",
+  ).length;
   const config = policy?.config;
 
   return (
@@ -109,7 +113,7 @@ function OverviewPage() {
             </h1>
             <p className="mt-1 text-[12.5px] text-pewter">
               {workspace?.name ?? "Your workspace"} · {data?.pendingCount ?? 0} action(s) need your tap
-              {nextPayroll?.nextRunAt ? ` · payroll ${dateOf(nextPayroll.nextRunAt)}` : ""}
+              {openDisputes > 0 ? ` · ${openDisputes} open dispute${openDisputes === 1 ? "" : "s"}` : ""}
             </p>
           </div>
           <Link
@@ -139,17 +143,10 @@ function OverviewPage() {
             tone="red"
           />
           <StatTile
-            label="Next payroll"
-            value={
-              nextPayroll?.nextRunAt
-                ? new Date(nextPayroll.nextRunAt).toLocaleDateString("en-US", {
-                    month: "short",
-                    day: "numeric",
-                  })
-                : "—"
-            }
-            hint={nextPayroll?.status ?? "no payroll schedule"}
-            tone="green"
+            label="Open disputes"
+            value={openDisputes}
+            hint={openDisputes > 0 ? "buyer claims need defense" : "nothing to defend"}
+            tone={openDisputes > 0 ? "amber" : "default"}
           />
         </div>
 

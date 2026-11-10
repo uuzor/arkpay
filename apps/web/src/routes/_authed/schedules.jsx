@@ -5,11 +5,10 @@ import { toast } from "sonner";
 import { ChevronDown, Play, Pause, Loader2, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { apiJson } from "@/lib/api";
-import Money from "@/components/arkay/Money";
 import StatusPill from "@/components/arkay/StatusPill";
 import NewScheduleDialog from "@/components/arkay/NewScheduleDialog";
 import { kindLabel, runTone, scheduleTone, summarizeJson, timeAgo, triggerLabel } from "@/lib/actionShapes";
-import { contactsQuery, payrollDetailQuery, payrollRunsQuery, scheduleRunsQuery, schedulesQuery } from "@/lib/queries";
+import { scheduleRunsQuery, schedulesQuery } from "@/lib/queries";
 
 export const Route = createFileRoute("/_authed/schedules")({
   head: () => ({ meta: [{ title: "Schedules · Arkay" }] }),
@@ -41,83 +40,12 @@ function RunHistory({ scheduleId }) {
   );
 }
 
-function PayrollScheduleDetail() {
-  const runs = useQuery(payrollRunsQuery);
-  const latest = runs.data?.[0] ?? null;
-  const detail = useQuery({ ...payrollDetailQuery(latest?.period), enabled: !!latest?.period });
-  const staff = useQuery({ ...contactsQuery("STAFF"), enabled: !runs.isLoading && !latest });
-
-  if (runs.isLoading) return <div className="h-16 animate-pulse rounded-lg bg-fog" />;
-  if (runs.isError) return <p className="text-[12px] text-red-700">Could not load payroll: {runs.error?.message}</p>;
-  if (!latest) {
-    const roster = staff.data ?? [];
-    return (
-      <div className="text-[12px] text-graphite">
-        <p>No payroll prepared yet — press Run to prepare the current month.</p>
-        {staff.isLoading ? (
-          <div className="mt-2 h-10 animate-pulse rounded-lg bg-fog" />
-        ) : roster.length > 0 ? (
-          <>
-            <p className="mt-2 font-medium text-ink">Next run will pay {roster.length} staffer{roster.length === 1 ? "" : "s"}:</p>
-            <ul className="mt-1 divide-y divide-mist/50 rounded-lg border border-mist/60 bg-paper">
-              {roster.map((c) => (
-                <li key={c.id} className="flex items-baseline justify-between gap-3 px-3 py-1.5">
-                  <span className="truncate text-[12.5px] font-medium text-ink">{c.name}</span>
-                  <span className="shrink-0 font-mono text-[11px] text-graphite">
-                    {c.usualAmount != null ? <Money amount={c.usualAmount} currency={c.currency} /> : "no usual amount"}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </>
-        ) : (
-          <p className="mt-2">No STAFF contacts yet — add them on the Contacts page first.</p>
-        )}
-      </div>
-    );
-  }
-  const members = detail.data?.members ?? [];
-  return (
-    <div>
-      <p className="text-[12px] text-graphite">
-        Latest prepared run: <span className="font-medium text-ink">{latest.period}</span> ·{" "}
-        <Money amount={latest.totalAmount} currency={latest.currency} className="font-medium text-ink" /> ·{" "}
-        {String(latest.status).toLowerCase()} · prepared {timeAgo(latest.preparedAt)} by {latest.preparedBy ?? "scheduler"}
-      </p>
-      {detail.isLoading ? (
-        <div className="mt-2 h-16 animate-pulse rounded-lg bg-fog" />
-      ) : (
-        <ul className="mt-2 divide-y divide-mist/50 rounded-lg border border-mist/60 bg-paper">
-          {members.map((m) => (
-            <li key={m.id} className="flex items-baseline justify-between gap-3 px-3 py-1.5">
-              <span className="min-w-0">
-                <span className="block truncate text-[12.5px] font-medium text-ink">{m.payeeName}</span>
-                <span className="block truncate font-mono text-[10.5px] text-steel">{m.payeePaypal}</span>
-              </span>
-              <span className="shrink-0 text-right">
-                <Money amount={m.amount} currency={m.currency} className="block text-[12.5px] font-medium text-ink" />
-                <span className="block text-[10.5px] text-steel">{String(m.status).toLowerCase().replace(/_/g, " ")}</span>
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
+// NOTE (Nov 2026 redesign): the payroll-prep detail block is frozen for the
+// solo-earner story. PAYROLL_PREPARE schedules still run server-side and stay
+// visible, pausable and runnable in the generic list below.
 
 function ScheduleDetails({ schedule }) {
   const payload = schedule.payload ?? {};
-  if (schedule.kind === "PAYROLL_PREPARE") {
-    return (
-      <div className="space-y-2">
-        <p className="text-[12px] text-graphite">
-          Each run prepares one monthly team payout from STAFF contacts and writes it as a payroll batch for approval. Nothing moves until the batch is approved.
-        </p>
-        <PayrollScheduleDetail />
-      </div>
-    );
-  }
   if (schedule.kind === "INVOICE_REMINDERS") {
     return (
       <p className="text-[12px] text-graphite">
@@ -283,7 +211,7 @@ function SchedulesPage() {
         <div>
           <h1 className="text-[22px] font-semibold tracking-[-0.03em] text-ink">Schedules</h1>
           <p className="mt-1 text-[12.5px] text-pewter">
-            The scheduler is the only business timer — payroll prep, invoice reminders, notifications, agent tasks.
+            The scheduler runs invoice reminders, notifications, and agent tasks — automatically, on your timezone.
           </p>
         </div>
         <button
@@ -308,7 +236,7 @@ function SchedulesPage() {
       ) : rows.length === 0 ? (
         <div className="rounded-xl border border-mist/70 bg-paper px-4 py-10 text-center">
           <p className="text-[13px] font-medium text-ink">No schedules yet</p>
-          <p className="mt-1 text-[12px] text-pewter">New workspaces get payroll and reminder schedules automatically.</p>
+          <p className="mt-1 text-[12px] text-pewter">Reminder schedules appear here automatically.</p>
         </div>
       ) : (
         <div className="overflow-hidden rounded-xl border border-mist/70 bg-paper">

@@ -16,6 +16,7 @@ import {
   POLICY_RULES,
   SAFETY_POLICY_VERSION,
   evaluateSafety,
+  typeMovesMoney,
   type SafetyApproval,
   type SafetyContact,
   type SafetyEvaluationInput,
@@ -306,6 +307,7 @@ export class SafetyService {
     const verdict = evaluateSafety(
       {
         ...input,
+        movesMoney: typeMovesMoney(input.type),
         contact: contact as unknown as SafetyContact | null,
         history,
       },
@@ -366,6 +368,7 @@ export class SafetyService {
     const verdict = evaluateSafety(
       {
         type: action.type,
+        movesMoney: typeMovesMoney(action.type),
         payeeName: action.payeeName,
         payeePaypal: action.payeePaypal,
         amount: action.amount.toString(),
@@ -547,11 +550,20 @@ export class SafetyService {
     let vendorSpentToday = 0;
     let globalSpentToday = 0;
     if (input.type !== ActionType.INVOICE) {
+      // Conservative: dispute offers and claim acceptances commit money
+      // out, so they count toward the same daily caps as payouts.
       const baseWhere: Prisma.ActionWhereInput = {
         workspaceId: input.workspaceId,
         currency: input.currency.trim().toUpperCase(),
         status: { in: COMMITTED_PAYOUT_STATUSES },
-        type: { in: [ActionType.PAYOUT_SINGLE, ActionType.PAYOUT_BATCH] },
+        type: {
+          in: [
+            ActionType.PAYOUT_SINGLE,
+            ActionType.PAYOUT_BATCH,
+            ActionType.DISPUTE_OFFER,
+            ActionType.DISPUTE_ACCEPT_CLAIM,
+          ],
+        },
         updatedAt: { gte: dayStart },
       };
       const [vendor, global] = await Promise.all([

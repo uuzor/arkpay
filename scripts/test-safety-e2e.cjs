@@ -280,12 +280,24 @@ async function cleanup() {
         throw new Error('PayPal must not be called');
       },
     };
+    const neverPaypal = {
+      getSubscription: async () => {
+        paypalCalled = true;
+        throw new Error('PayPal must not be called');
+      },
+      getDispute: async () => {
+        paypalCalled = true;
+        throw new Error('PayPal must not be called');
+      },
+    };
     const approvals = new ApprovalsService(
       prisma,
       config,
       audit,
       contacts,
       fakeInvoices,
+      neverPaypal,
+      neverPaypal,
       fakePayouts,
       safety,
     );

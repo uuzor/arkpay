@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router";
 const COLUMNS = [
   {
     title: "Product",
-    links: ["Overview", "Requests", "Payroll", "Contacts", "Audit log"],
+    links: ["Overview", "Requests", "Subscriptions", "Contacts", "Audit log"],
   },
   {
     title: "Safety",
@@ -30,7 +30,7 @@ export default function SiteFooter() {
               <span className="font-dm text-[18px] font-semibold tracking-tight text-paper">ArkPay</span>
             </div>
             <p className="mt-4 max-w-[280px] text-[13px] leading-[1.65] text-paper/70">
-              One shared place for money requests, approvals, and PayPal actions — so nothing gets missed.
+              The pocket finance office for freelancers — invoiced, chased, collected, and proven safe.
             </p>
             <p className="mt-4 inline-flex items-center gap-2 rounded-[8px] bg-paper/10 px-2.5 py-1.5 text-[11.5px] font-medium text-paper/85">
               <span className="h-1.5 w-1.5 rounded-full bg-highlighter" />

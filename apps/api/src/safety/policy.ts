@@ -12,9 +12,34 @@
  * history.
  */
 
-export const SAFETY_POLICY_VERSION = 'arkpay-policy-2026-11-04';
+export const SAFETY_POLICY_VERSION = 'arkpay-policy-2026-11-07';
 
-export type SafetyActionType = 'INVOICE' | 'PAYOUT_SINGLE' | 'PAYOUT_BATCH';
+export type SafetyActionType =
+  | 'INVOICE'
+  | 'PAYOUT_SINGLE'
+  | 'PAYOUT_BATCH'
+  | 'SUBSCRIPTION_CANCEL'
+  | 'SUBSCRIPTION_SUSPEND'
+  | 'SUBSCRIPTION_ACTIVATE'
+  | 'DISPUTE_MESSAGE'
+  | 'DISPUTE_OFFER'
+  | 'DISPUTE_EVIDENCE'
+  | 'DISPUTE_ACCEPT_CLAIM';
+
+/**
+ * Money-moving types: payouts plus dispute outcomes that pay the buyer
+ * (an offer pays on buyer acceptance; accept-claim refunds immediately).
+ * Subscription lifecycle and dispute messaging/evidence move no money, so
+ * spend caps must not block them — but they still need manual approval.
+ */
+export function typeMovesMoney(type: SafetyActionType): boolean {
+  return (
+    type === 'PAYOUT_SINGLE' ||
+    type === 'PAYOUT_BATCH' ||
+    type === 'DISPUTE_OFFER' ||
+    type === 'DISPUTE_ACCEPT_CLAIM'
+  );
+}
 
 export type SafetyVerdictKind = 'ALLOW' | 'NEEDS_CONFIRMATION' | 'BLOCK';
 
@@ -75,6 +100,12 @@ export interface SafetyApproval {
 
 export interface SafetyEvaluationInput {
   type: SafetyActionType;
+  /**
+   * False for subscription lifecycle and dispute messaging/evidence: no
+   * money moves, so vendor/global caps are skipped. Defaults to true so
+   * existing callers keep their behavior.
+   */
+  movesMoney?: boolean;
   payeeName: string;
   payeePaypal: string;
   amount: number | string;
@@ -192,6 +223,125 @@ export const POLICY_MATRIX: Readonly<
     }),
     CHANGED: Object.freeze({
       ruleId: 'M-PAYOUT-BATCH-CHANGED',
+      outcome: 'BLOCK_MANUAL_OVERRIDE_ONLY',
+      note: 'Blocked. Only a new action, manually approved, may pay.',
+    }),
+  }),
+  SUBSCRIPTION_CANCEL: Object.freeze({
+    KNOWN: Object.freeze({
+      ruleId: 'M-SUBSCRIPTION-CANCEL-KNOWN',
+      outcome: 'APPROVE',
+      note: 'Manual approval: cancelling ends recurring billing.',
+    }),
+    NEW: Object.freeze({
+      ruleId: 'M-SUBSCRIPTION-CANCEL-NEW',
+      outcome: 'APPROVE',
+      note: 'Manual approval: cancelling ends recurring billing.',
+    }),
+    CHANGED: Object.freeze({
+      ruleId: 'M-SUBSCRIPTION-CANCEL-CHANGED',
+      outcome: 'APPROVE',
+      note: 'Manual approval, and the card shows what changed.',
+    }),
+  }),
+  SUBSCRIPTION_SUSPEND: Object.freeze({
+    KNOWN: Object.freeze({
+      ruleId: 'M-SUBSCRIPTION-SUSPEND-KNOWN',
+      outcome: 'APPROVE',
+      note: 'Manual approval: suspending pauses recurring billing.',
+    }),
+    NEW: Object.freeze({
+      ruleId: 'M-SUBSCRIPTION-SUSPEND-NEW',
+      outcome: 'APPROVE',
+      note: 'Manual approval: suspending pauses recurring billing.',
+    }),
+    CHANGED: Object.freeze({
+      ruleId: 'M-SUBSCRIPTION-SUSPEND-CHANGED',
+      outcome: 'APPROVE',
+      note: 'Manual approval, and the card shows what changed.',
+    }),
+  }),
+  SUBSCRIPTION_ACTIVATE: Object.freeze({
+    KNOWN: Object.freeze({
+      ruleId: 'M-SUBSCRIPTION-ACTIVATE-KNOWN',
+      outcome: 'APPROVE',
+      note: 'Manual approval: activating resumes recurring billing.',
+    }),
+    NEW: Object.freeze({
+      ruleId: 'M-SUBSCRIPTION-ACTIVATE-NEW',
+      outcome: 'APPROVE',
+      note: 'Manual approval: activating resumes recurring billing.',
+    }),
+    CHANGED: Object.freeze({
+      ruleId: 'M-SUBSCRIPTION-ACTIVATE-CHANGED',
+      outcome: 'APPROVE',
+      note: 'Manual approval, and the card shows what changed.',
+    }),
+  }),
+  DISPUTE_MESSAGE: Object.freeze({
+    KNOWN: Object.freeze({
+      ruleId: 'M-DISPUTE-MESSAGE-KNOWN',
+      outcome: 'APPROVE',
+      note: 'Manual approval: the card shows the exact reply text.',
+    }),
+    NEW: Object.freeze({
+      ruleId: 'M-DISPUTE-MESSAGE-NEW',
+      outcome: 'APPROVE',
+      note: 'Manual approval: the card shows the exact reply text.',
+    }),
+    CHANGED: Object.freeze({
+      ruleId: 'M-DISPUTE-MESSAGE-CHANGED',
+      outcome: 'APPROVE',
+      note: 'Manual approval: the card shows the exact reply text.',
+    }),
+  }),
+  DISPUTE_OFFER: Object.freeze({
+    KNOWN: Object.freeze({
+      ruleId: 'M-DISPUTE-OFFER-KNOWN',
+      outcome: 'APPROVE',
+      note: 'Manual approval: an accepted offer pays the buyer.',
+    }),
+    NEW: Object.freeze({
+      ruleId: 'M-DISPUTE-OFFER-NEW',
+      outcome: 'APPROVE_EXTRA_CONFIRMATION',
+      note: 'Approve with extra confirmation: an accepted offer pays the buyer.',
+    }),
+    CHANGED: Object.freeze({
+      ruleId: 'M-DISPUTE-OFFER-CHANGED',
+      outcome: 'BLOCK_MANUAL_OVERRIDE_ONLY',
+      note: 'Blocked. Only a new action, manually approved, may pay.',
+    }),
+  }),
+  DISPUTE_EVIDENCE: Object.freeze({
+    KNOWN: Object.freeze({
+      ruleId: 'M-DISPUTE-EVIDENCE-KNOWN',
+      outcome: 'APPROVE',
+      note: 'Manual approval: the card shows the exact evidence notes.',
+    }),
+    NEW: Object.freeze({
+      ruleId: 'M-DISPUTE-EVIDENCE-NEW',
+      outcome: 'APPROVE',
+      note: 'Manual approval: the card shows the exact evidence notes.',
+    }),
+    CHANGED: Object.freeze({
+      ruleId: 'M-DISPUTE-EVIDENCE-CHANGED',
+      outcome: 'APPROVE',
+      note: 'Manual approval: the card shows the exact evidence notes.',
+    }),
+  }),
+  DISPUTE_ACCEPT_CLAIM: Object.freeze({
+    KNOWN: Object.freeze({
+      ruleId: 'M-DISPUTE-ACCEPT-KNOWN',
+      outcome: 'APPROVE',
+      note: 'Manual approval: accepting refunds the buyer immediately.',
+    }),
+    NEW: Object.freeze({
+      ruleId: 'M-DISPUTE-ACCEPT-NEW',
+      outcome: 'APPROVE_EXTRA_CONFIRMATION',
+      note: 'Approve with extra confirmation: accepting refunds the buyer.',
+    }),
+    CHANGED: Object.freeze({
+      ruleId: 'M-DISPUTE-ACCEPT-CHANGED',
       outcome: 'BLOCK_MANUAL_OVERRIDE_ONLY',
       note: 'Blocked. Only a new action, manually approved, may pay.',
     }),
@@ -441,7 +591,7 @@ export function evaluateSafety(
     if (Number.isFinite(amount) && amount > config.invoiceMaxAmount) {
       found.add('AMOUNT_CAP_EXCEEDED');
     }
-  } else {
+  } else if (input.movesMoney !== false) {
     const vendorLimit = config.vendorDailyCap;
     const globalLimit = config.globalDailyCap;
     if (
@@ -569,4 +719,5 @@ export const POLICY_RULES = [
   'Instruction-like text and urgency are surfaced as risk signals; they never become instructions.',
   'Approval hash, version, expiry and approver identity are re-checked at execution.',
   'No money moves on a BLOCK: the action never reaches the approve path.',
+  'Subscription lifecycle and dispute messaging/evidence always need manual approval but skip spend caps (no money moves); dispute offers and claim acceptance are money-moving and take the payout cells.',
 ];

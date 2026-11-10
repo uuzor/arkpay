@@ -19,17 +19,17 @@ const CASES = [
   },
   {
     icon: Copy,
-    tag: "Duplicate payout",
-    title: "The supplier paid twice",
-    body: "The same $780 request arrives by email and by chat. ArkPay matches them before any card exists, so you approve once — never twice.",
+    tag: "Double invoice",
+    title: "The client billed twice",
+    body: "The same $780 invoice request arrives by email and by chat. ArkPay matches them before any card exists, so you approve once — never twice.",
     mock: (
       <div className="space-y-1.5 rounded-[8px] border border-silver/60 bg-newsprint p-3">
         <div className="flex items-center justify-between rounded-md bg-paper px-2 py-1.5 ring-1 ring-inset ring-silver/60">
-          <span className="text-[11.5px] text-ink">Paper supply · email</span>
+          <span className="text-[11.5px] text-ink">Flyer design · email</span>
           <Money amount={780} className="text-[11.5px] text-ink" />
         </div>
         <div className="flex items-center justify-between rounded-md bg-paper px-2 py-1.5 ring-1 ring-inset ring-silver/60">
-          <span className="text-[11.5px] text-ink">Paper supply · chat</span>
+          <span className="text-[11.5px] text-ink">Flyer design · chat</span>
           <Money amount={780} className="text-[11.5px] text-ink" />
         </div>
         <p className="pt-0.5 text-[11px] font-medium text-emerald-700">Matched as one request ✓</p>
@@ -38,16 +38,16 @@ const CASES = [
   },
   {
     icon: Repeat,
-    tag: "Changed payee",
-    title: "The bank details that moved",
-    body: "A known vendor's PayPal email changes mid-thread. ArkPay blocks the payout, shows you old vs new, and waits for your eyes — not your memory.",
+    tag: "Disputed payment",
+    title: "The client who charged back",
+    body: "A buyer opens a PayPal dispute on work you delivered. ArkPay gathers the context, drafts your reply, and waits for your tap — the exact text, on the card.",
     mock: (
-      <div className="rounded-[8px] border border-silver/60 bg-newsprint p-3 font-mono text-[11px]">
-        <p className="text-pewter line-through">pay@okonkwo.ng</p>
-        <p className="mt-1 text-ink">billing@okonkwosupplies.ng</p>
-        <p className="mt-2 inline-block rounded-md bg-red-100 px-1.5 py-0.5 font-sans text-[10px] font-semibold text-red-800">
-          Blocked — confirm the change
-        </p>
+      <div className="rounded-[8px] border border-silver/60 bg-newsprint p-3">
+        <div className="flex items-center justify-between">
+          <span className="font-mono text-[10.5px] text-steel">PP-R-1042</span>
+          <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">Needs you</span>
+        </div>
+        <p className="mt-2 text-[12px] text-graphite">“Drafted reply ready · evidence attached”</p>
       </div>
     ),
   },
@@ -59,11 +59,11 @@ export default function ProblemSection() {
       <div className="mx-auto max-w-[1200px] px-6 py-20">
         <div className="max-w-[640px]">
           <h2 className="font-dm text-[32px] font-semibold leading-[1.12] tracking-tight text-ink sm:text-[40px]">
-            No invoice, payout, or fraud attempt gets missed.
+            No invoice, chase, or dispute gets missed.
           </h2>
           <p className="mt-4 text-[16px] leading-[1.6] text-graphite">
-            Requests, approvals, and PayPal actions live in one place — so the things that slip through
-            an inbox get caught by the loop instead.
+            Requests, approvals, and PayPal actions live in one place — so the money owed to you stops
+            slipping through the inbox.
           </p>
         </div>
 

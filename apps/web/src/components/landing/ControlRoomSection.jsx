@@ -5,11 +5,11 @@ import CheckRow from "@/components/arkay/CheckRow";
 
 const JSON_ROWS = [
   ["intent", '"payout"'],
-  ["payee", '"Okonkwo Supplies Ltd"'],
-  ["paypal_email", '"billing@okonkwosupplies.ng"'],
+  ["payee", '"Lagos Print Co"'],
+  ["paypal_email", '"billing@lagosprint-new.ng"'],
   ["amount", "1200.00"],
   ["currency", '"USD"'],
-  ["purpose", '"February packaging"'],
+  ["purpose", '"Refund: March deposit"'],
 ];
 
 export default function ControlRoomSection() {
@@ -27,7 +27,7 @@ export default function ControlRoomSection() {
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-silver/60 px-5 py-3">
             <div className="flex items-center gap-2">
               <span className="font-mono text-[11px] text-steel">REQ-1042</span>
-              <span className="text-[13px] font-medium text-ink">Supplier pay request</span>
+              <span className="text-[13px] font-medium text-ink">Client refund request</span>
             </div>
             <div className="flex items-center gap-2">
               <RiskChip type="changed_payee" />
@@ -38,11 +38,11 @@ export default function ControlRoomSection() {
           <div className="grid lg:grid-cols-3">
             <div className="border-b border-silver/60 p-5 lg:border-b-0 lg:border-r">
               <p className="text-[10px] font-medium uppercase tracking-[0.16em] text-steel">Raw email</p>
-              <p className="mt-3 text-[12px] text-pewter">From: accounts@okonkwosupplies.ng</p>
+              <p className="mt-3 text-[12px] text-pewter">From: ada@lagosprint.ng</p>
               <p className="mt-2 text-[13px] leading-[1.7] text-graphite">
-                Hi, please note our PayPal email has changed — use{" "}
-                <span className="bg-highlighter/60 px-1 text-ink">billing@okonkwosupplies.ng</span> for the February
-                packaging payment of $1,200. Kindly pay today, our old account is closed.
+                Hi, please refund my March deposit to my new PayPal — use{" "}
+                <span className="bg-highlighter/60 px-1 text-ink">billing@lagosprint-new.ng</span> for the $1,200.
+                Kindly pay today, my old account is closed.
               </p>
               <p className="mt-3 flex items-center gap-1.5 font-mono text-[10.5px] text-red-600">
                 <Lock className="h-3 w-3" /> urgency pattern flagged
@@ -68,7 +68,7 @@ export default function ControlRoomSection() {
                 <CheckRow label="Currency allow-list" detail="USD permitted" state="pass" />
                 <CheckRow label="Amount within vendor cap" detail="$1,200 of $2,000" state="pass" />
                 <CheckRow label="Duplicate invoice scan" detail="No match in 90 days" state="pass" />
-                <CheckRow label="Payee PayPal email" detail="Changed 2 days ago — was pay@okonkwo.ng" state="fail" />
+                <CheckRow label="Payee PayPal email" detail="Changed 2 days ago — was ada@lagosprint.ng" state="fail" />
               </div>
               <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-[11.5px] font-medium text-red-700 ring-1 ring-inset ring-red-100">
                 Blocked: manual approval required. No money moved.

@@ -1,8 +1,8 @@
 # ArkPay
 
-**ArkPay is the payments agent with a safety engine, for businesses and freelancers:** it reads a money request from email or chat, drafts the PayPal invoice or payout, and waits for one approval before executing — with policy caps, risk checks, idempotency, and a full audit trail.
+**ArkPay is the pocket finance office for freelancers getting paid:** a client emails asking for an invoice, you tap once on your phone, and the PayPal invoice is sent, chased when late, and defended if disputed — every step guarded by a safety engine with policy caps, risk checks, idempotency, and a full audit trail.
 
-Never type an invoice again. Just talk. Read the request. Approve once. Pay safely on PayPal.
+Get paid without the paperwork. Invoiced, chased, collected, and proven safe.
 
 Built for the PayPal AI Hackathon. Deadline: **Nov 12, 2026**.
 
@@ -37,7 +37,7 @@ What you can do without connecting anything:
   (`PAYEE_CHANGED` + urgency, no approve button).
 - **Agent chat** (right-side bar) — balances, spend, pending queue, and
   "send invoice to …" drafts that land in Approvals. Runs on Muse Wonder.
-- **Requests / Contacts / Schedules / Payroll** — seeded rows to browse.
+- **Requests / Contacts / Schedules / Subscriptions / Disputes** — seeded rows to browse.
 - **Voice + vision** — pair Telegram via the dashboard link code, then send a
   voice note (Muse Voice Transcribe) or receipt photo (Spark vision) to get a
   draft + approval card.
@@ -123,8 +123,8 @@ the vision model; scanned PDFs ask for photos instead.
 Every action passes a versioned policy at card creation and again inside the
 execution transaction. A changed PayPal email on a payout, a cap breach, a
 duplicate, an invalid currency or a failed approval check becomes `BLOCKED`:
-no approve button, no PayPal call, and an audit entry. The fake
-“our PayPal email changed, pay the new one” case is the demo.
+no approve button, no PayPal call, and an audit entry. The demo case: a
+“client” asking for a refund to a brand-new PayPal address gets stopped cold.
 
 ```bash
 pnpm --filter @arkpay/api test:safety        # 25 pure-policy tests

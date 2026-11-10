@@ -7,7 +7,9 @@ Execution note (updated Nov 3, 10:00 PM): Phase 8's Payment Safety Engine and Ph
 
 ## Goal
 
-Ship the hackathon core loop on PayPal sandbox: Gmail money-request in → LLM extraction → Telegram one-tap approval → PayPal invoice or payout (single + batch) → webhook status loop → audit trail — with the Payment Safety Engine visibly blocking the demo fraud case. The active model is `deepseek/deepseek-v4.1-flash-1017` served by the OpenAI-compatible endpoint in `META_MODEL_URL`; Anthropic/Claude is not used.
+Ship the hackathon core loop on PayPal sandbox for ONE customer — the solo earner getting paid: Gmail invoice-request in → LLM extraction → Telegram one-tap approval → PayPal invoice sent → webhook status loop → auto-chase when late → dispute-draft defense when charged back → audit trail — with the Payment Safety Engine visibly blocking the demo fraud case. Sender-side depth (payroll, supplier batches) is frozen, not cut: the code stays, the story doesn't lead with it. The active model is `deepseek/deepseek-v4.1-flash-1017` served by the OpenAI-compatible endpoint in `META_MODEL_URL`; Anthropic/Claude is not used.
+
+Positioning note (Nov 7, post-Vultr result): we lost to a product with one customer and one moment (finance team, before the payment run). ArkPay now answers the same way — *Ada, freelance designer in Lagos, money owed to her* — instead of "businesses and freelancers." Nothing architectural changed; the loop, policy and audit already served this story.
 
 ## Success Criteria
 
@@ -130,7 +132,7 @@ Build in dependency order (credentials → money rail → inbox → brain → ap
 
 ### Phase 8 — Safety Engine + fraud demo case
 
-- [x] `safety/policy.ts`: pure `evaluateSafety(action, contact, history, approval) → {verdict, flags[], reasons, policyVersion}`. `safety/safety.service.ts` supplies contact/duplicate/cap/batch history from Prisma. Policy version `arkpay-policy-2026-11-04` (matrix + never-rules as data, ruleIds/payeeStatus in verdicts; version string verified on disk).
+- [x] `safety/policy.ts`: pure `evaluateSafety(action, contact, history, approval) → {verdict, flags[], reasons, policyVersion}`. `safety/safety.service.ts` supplies contact/duplicate/cap/batch history from Prisma. Policy version `arkpay-policy-2026-11-07` (matrix + never-rules as data, ruleIds/payeeStatus in verdicts; 10 action types incl. subscriptions + disputes; version string verified on disk).
 - [x] **Gate 1** at every creation path: email pipeline, AI-agent invoice draft, team batch assembly, demo card and supersede/edit. A `BLOCK` verdict persists the action as `BLOCKED`, writes `SAFETY_EVALUATED` + `BLOCKED` audit rows, and sends a visible block notice with **no approve button**.
 - [x] **Gate 2** inside the single and batch execution transactions, after hash/version verification and before the `EXECUTING` flip. A new duplicate, consumed cap or changed payee refuses execution, marks the row `BLOCKED`, and makes no PayPal call.
 - [x] Checks: currency allow-list, amount/email/due-date validity, invoice maximum, per-vendor + global daily caps, batch size/total caps, duplicates, payee-change, amount anomaly, injection/urgency signals, new-payee confirmation, approval expiry/hash/version/approver identity.

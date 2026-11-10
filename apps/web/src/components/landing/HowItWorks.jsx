@@ -7,7 +7,7 @@ const STEPS = [
   {
     n: "02",
     title: "Understands",
-    body: "Classifies the ask — payment, invoice request, or noise — and extracts payee, amount, currency, purpose and due date.",
+    body: "Classifies the ask — a client needing an invoice, money you owe, or noise — and extracts payee, amount, currency, purpose and due date.",
   },
   {
     n: "03",
@@ -16,8 +16,8 @@ const STEPS = [
   },
   {
     n: "04",
-    title: "Acts",
-    body: "Creates and sends the PayPal invoice, or pays out through Payouts. Then tracks it through webhooks and chases it.",
+    title: "Collects",
+    body: "Sends the PayPal invoice, then tracks it through webhooks — chasing it when late and drafting your defense if it's disputed.",
   },
 ];
 

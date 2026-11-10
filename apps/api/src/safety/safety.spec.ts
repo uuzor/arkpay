@@ -6,6 +6,7 @@ import {
   POLICY_MATRIX,
   SAFETY_POLICY_VERSION,
   evaluateSafety,
+  typeMovesMoney,
   type PayeeStatus,
   type SafetyActionType,
   type SafetyEvaluationInput,
@@ -368,4 +369,93 @@ test('§6 NEVER rule set is exactly the four documented rules', () => {
       'NEVER-RAW-MODEL-OUTPUT',
     ],
   );
+});
+
+test('matrix covers all ten action types', () => {
+  assert.deepEqual(Object.keys(POLICY_MATRIX).sort(), [
+    'DISPUTE_ACCEPT_CLAIM',
+    'DISPUTE_EVIDENCE',
+    'DISPUTE_MESSAGE',
+    'DISPUTE_OFFER',
+    'INVOICE',
+    'PAYOUT_BATCH',
+    'PAYOUT_SINGLE',
+    'SUBSCRIPTION_ACTIVATE',
+    'SUBSCRIPTION_CANCEL',
+    'SUBSCRIPTION_SUSPEND',
+  ]);
+});
+
+test('typeMovesMoney: payouts + dispute offer/accept only', () => {
+  assert.equal(typeMovesMoney('PAYOUT_SINGLE'), true);
+  assert.equal(typeMovesMoney('PAYOUT_BATCH'), true);
+  assert.equal(typeMovesMoney('DISPUTE_OFFER'), true);
+  assert.equal(typeMovesMoney('DISPUTE_ACCEPT_CLAIM'), true);
+  assert.equal(typeMovesMoney('INVOICE'), false);
+  assert.equal(typeMovesMoney('SUBSCRIPTION_CANCEL'), false);
+  assert.equal(typeMovesMoney('SUBSCRIPTION_SUSPEND'), false);
+  assert.equal(typeMovesMoney('SUBSCRIPTION_ACTIVATE'), false);
+  assert.equal(typeMovesMoney('DISPUTE_MESSAGE'), false);
+  assert.equal(typeMovesMoney('DISPUTE_EVIDENCE'), false);
+});
+
+test('subscription lifecycle: always manual, cites its cell', () => {
+  const cases: Array<[SafetyActionType, string]> = [
+    ['SUBSCRIPTION_CANCEL', 'M-SUBSCRIPTION-CANCEL-KNOWN'],
+    ['SUBSCRIPTION_SUSPEND', 'M-SUBSCRIPTION-SUSPEND-KNOWN'],
+    ['SUBSCRIPTION_ACTIVATE', 'M-SUBSCRIPTION-ACTIVATE-KNOWN'],
+    ['DISPUTE_MESSAGE', 'M-DISPUTE-MESSAGE-KNOWN'],
+    ['DISPUTE_EVIDENCE', 'M-DISPUTE-EVIDENCE-KNOWN'],
+  ];
+  for (const [type, ruleId] of cases) {
+    const verdict = evaluateSafety(cellAction(type, 'KNOWN'));
+    assert.equal(verdict.verdict, 'NEEDS_CONFIRMATION', type);
+    assert.equal(verdict.ruleIds[0], ruleId, type);
+    assert.equal(verdict.autoApproveEligible, false, type);
+  }
+});
+
+test('non-money actions skip spend caps (movesMoney=false)', () => {
+  const verdict = evaluateSafety(
+    action({
+      type: 'SUBSCRIPTION_CANCEL',
+      movesMoney: false,
+      history: { vendorSpentToday: 1_000_000, globalSpentToday: 1_000_000 },
+    }),
+  );
+  assert.equal(verdict.verdict, 'NEEDS_CONFIRMATION');
+  assert.ok(!verdict.flags.includes('VENDOR_CAP_EXCEEDED'));
+  assert.ok(!verdict.flags.includes('GLOBAL_CAP_EXCEEDED'));
+});
+
+test('dispute offer enforces spend caps like a payout', () => {
+  const verdict = evaluateSafety(
+    action({
+      type: 'DISPUTE_OFFER',
+      history: { vendorSpentToday: 1_000_000, globalSpentToday: 0 },
+    }),
+  );
+  assert.equal(verdict.verdict, 'BLOCK');
+  assert.ok(verdict.flags.includes('VENDOR_CAP_EXCEEDED'));
+  assert.ok(verdict.ruleIds.includes('NEVER-EXCEED-CAPS'));
+});
+
+test('dispute offer to a changed payee is BLOCKED like a payout', () => {
+  const verdict = evaluateSafety(cellAction('DISPUTE_OFFER', 'CHANGED'));
+  assert.equal(verdict.verdict, 'BLOCK');
+  assert.equal(verdict.ruleIds[0], 'M-DISPUTE-OFFER-CHANGED');
+  const accept = evaluateSafety(cellAction('DISPUTE_ACCEPT_CLAIM', 'CHANGED'));
+  assert.equal(accept.verdict, 'BLOCK');
+  assert.equal(accept.ruleIds[0], 'M-DISPUTE-ACCEPT-CHANGED');
+});
+
+test('dispute offer/accept to a new payee needs extra confirmation', () => {
+  const offer = evaluateSafety(cellAction('DISPUTE_OFFER', 'NEW'));
+  assert.equal(offer.verdict, 'NEEDS_CONFIRMATION');
+  assert.equal(offer.extraConfirmationRequired, true);
+  const accept = evaluateSafety(cellAction('DISPUTE_ACCEPT_CLAIM', 'NEW'));
+  assert.equal(accept.extraConfirmationRequired, true);
+  const message = evaluateSafety(cellAction('DISPUTE_MESSAGE', 'NEW'));
+  assert.equal(message.verdict, 'NEEDS_CONFIRMATION');
+  assert.equal(message.extraConfirmationRequired, false);
 });

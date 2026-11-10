@@ -12,7 +12,7 @@ export default function ClosingCTA() {
             The request is already in your inbox. Let ArkPay answer it.
           </h2>
           <p className="mx-auto mt-4 max-w-[480px] text-[15px] leading-[1.6] text-paper/70">
-            Read, approved, paid, and proven safe — with an audit trail you can hand to an accountant.
+            Invoiced, chased, collected, and proven safe — with an audit trail you can hand to an accountant.
           </p>
           <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
             {isLoadingAuth ? (
