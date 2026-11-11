@@ -47,6 +47,31 @@ export async function apiFetch(path, init = {}) {
   return res;
 }
 
+/**
+ * Download an attachment endpoint (CSV export) through the session cookie.
+ * Throws ApiError on failure so callers can toast it; nothing is saved on
+ * error — a failed export never produces a partial file.
+ */
+export async function apiDownload(path, filename) {
+  const res = await apiFetch(path);
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new ApiError(`Export failed (HTTP ${res.status})${text ? `: ${text.slice(0, 160)}` : ""}`, res.status, null);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
+}
+
 export async function apiJson(path, init = {}) {
   const res = await apiFetch(path, init);
   const text = await res.text();

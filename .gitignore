@@ -5,6 +5,7 @@ dist-scheduler/
 dist-agent/
 dist-predraft/
 dist-billing/
+dist-csv/
 build/
 .next/
 out/

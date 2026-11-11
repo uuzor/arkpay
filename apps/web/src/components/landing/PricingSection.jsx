@@ -25,7 +25,7 @@ const PLANS = [
     price: "$49",
     cadence: "per month",
     body: "For a solo practice growing into a studio.",
-    features: ["Everything in Freelancer", "Retainer tracking", "Auto-approve under limits", "Full audit export"],
+    features: ["Everything in Freelancer", "Retainer tracking", "Auto-approve under limits", "CSV exports"],
     cta: "Start free trial",
     highlight: false,
   },

@@ -1,23 +1,25 @@
+import { useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
   ArrowRight,
   ArrowUpRight,
-  CalendarClock,
-  CheckCircle2,
+  BellRing,
   ShieldAlert,
   Sparkles,
 } from "lucide-react";
 import Money from "@/components/arkay/Money";
-import StatTile from "@/components/arkay/StatTile";
 import StatusPill from "@/components/arkay/StatusPill";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/AuthContext";
+import { apiJson } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import {
   approvalsQuery,
   billingDisputesQuery,
+  financeQuery,
   overviewQuery,
-  policyQuery,
   workspaceQuery,
 } from "@/lib/queries";
 
@@ -33,14 +35,45 @@ function timeOf(value) {
   });
 }
 
-function dateOf(value) {
-  if (!value) return "Not scheduled";
-  return new Date(value).toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+const TILE_TONE = {
+  default: "text-ink",
+  green: "text-emerald-700",
+  amber: "text-amber-800",
+  red: "text-red-700",
+};
+
+function MoneyTile({ label, totals, hint, tone = "default", to, search }) {
+  const entries = Object.entries(totals ?? {});
+  const body =
+    entries.length === 0 ? (
+      <p className="mt-2 text-[25px] font-semibold leading-none tracking-[-0.03em] tabular text-steel">—</p>
+    ) : (
+      <div className="mt-2 space-y-0.5">
+        {entries.slice(0, 2).map(([currency, value]) => (
+          <Money
+            key={currency}
+            amount={value}
+            currency={currency}
+            className={cn("block text-[22px] font-semibold leading-tight text-ink", TILE_TONE[tone])}
+          />
+        ))}
+        {entries.length > 2 ? (
+          <p className="text-[11px] text-pewter">+{entries.length - 2} more currencies</p>
+        ) : null}
+      </div>
+    );
+  return (
+    <div className="rounded-xl border border-mist/70 bg-paper p-4">
+      <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-steel">{label}</p>
+      {body}
+      {hint ? <p className="mt-2 text-[11.5px] leading-4 text-pewter">{hint}</p> : null}
+      {to ? (
+        <Link to={to} search={search} className="mt-2 inline-flex items-center gap-1 text-[11.5px] font-medium text-graphite hover:text-ink">
+          Details <ArrowUpRight className="h-3 w-3" />
+        </Link>
+      ) : null}
+    </div>
+  );
 }
 
 export const Route = createFileRoute("/_authed/overview")({
@@ -50,9 +83,11 @@ export const Route = createFileRoute("/_authed/overview")({
 
 function OverviewPage() {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const [remindingId, setRemindingId] = useState(null);
   const { data, isLoading, isError, error } = useQuery(overviewQuery);
+  const { data: finance } = useQuery(financeQuery);
   const { data: workspace } = useQuery(workspaceQuery);
-  const { data: policy } = useQuery(policyQuery);
   const { data: pending } = useQuery(approvalsQuery("PENDING_APPROVAL", 5));
   const { data: disputes } = useQuery(billingDisputesQuery());
 
@@ -61,6 +96,23 @@ function OverviewPage() {
     !workspace?.paypalConnected && "PayPal",
     !workspace?.telegramLink?.telegramId && "Telegram",
   ].filter(Boolean);
+
+  const remindNow = async (row) => {
+    setRemindingId(row.id);
+    try {
+      const res = await apiJson(`/invoices/${encodeURIComponent(row.id)}/remind`, { method: "POST" });
+      if (res?.alreadyPaid) {
+        toast("Already paid", { description: `${row.payeeName} paid — no reminder sent.` });
+      } else {
+        toast("Reminder sent", { description: `${row.payeeName} · ${row.paypalRef ?? "invoice"}.` });
+      }
+      queryClient.invalidateQueries({ queryKey: ["overview", "finance"] });
+    } catch (e) {
+      toast("Reminder failed", { description: e?.message ?? "Could not send the reminder." });
+    } finally {
+      setRemindingId(null);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -89,7 +141,7 @@ function OverviewPage() {
   const openDisputes = (disputes?.rows ?? []).filter(
     (d) => d.state !== "RESOLVED" && d.status !== "RESOLVED",
   ).length;
-  const config = policy?.config;
+  const overdue = finance?.overdue ?? [];
 
   return (
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
@@ -126,29 +178,73 @@ function OverviewPage() {
         </header>
 
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <StatTile
-            label="Pending"
-            value={data?.pendingCount ?? 0}
-            hint="waiting on your tap"
-            tone="amber"
+          <MoneyTile
+            label="Received"
+            totals={finance?.received}
+            hint={finance?.receivedCount ? `${finance.receivedCount} paid invoice${finance.receivedCount === 1 ? "" : "s"}` : "no paid invoices yet"}
+            tone="green"
+            to="/money"
+            search={{ tab: "invoices" }}
           />
-          <StatTile
-            label="In flight"
-            value={data?.inFlightCount ?? 0}
-            hint="payouts + invoices"
+          <MoneyTile
+            label="Paid out"
+            totals={finance?.paidOut}
+            hint={finance?.paidOutCount ? `${finance.paidOutCount} payout${finance.paidOutCount === 1 ? "" : "s"} sent` : "no payouts sent"}
+            to="/payouts"
           />
-          <StatTile
-            label="Blocked"
-            value={data?.blockedCount ?? 0}
-            hint="safety engine stopped"
-            tone="red"
+          <MoneyTile
+            label="Outstanding"
+            totals={finance?.outstanding}
+            hint={finance?.outstandingCount ? `${finance.outstandingCount} unpaid invoice${finance.outstandingCount === 1 ? "" : "s"}` : "nothing owed to you"}
+            to="/money"
+            search={{ tab: "invoices" }}
           />
-          <StatTile
-            label="Open disputes"
-            value={openDisputes}
-            hint={openDisputes > 0 ? "buyer claims need defense" : "nothing to defend"}
-            tone={openDisputes > 0 ? "amber" : "default"}
+          <MoneyTile
+            label="Overdue"
+            totals={finance?.overdueTotal}
+            hint={finance?.overdueCount ? `${finance.overdueCount} need chasing` : "nothing overdue"}
+            tone={finance?.overdueCount ? "amber" : "default"}
           />
+        </div>
+
+        <div className="rounded-xl border border-mist/70 bg-paper">
+          <div className="flex items-center justify-between border-b border-mist/60 px-4 py-3">
+            <div className="flex items-center gap-2">
+              <BellRing className="h-3.5 w-3.5 text-steel" />
+              <h2 className="text-[13px] font-semibold text-ink">Needs chasing</h2>
+            </div>
+            <Link to="/money" search={{ tab: "invoices" }} className="inline-flex items-center gap-1 text-[11.5px] font-medium text-graphite hover:text-ink">
+              All invoices <ArrowUpRight className="h-3 w-3" />
+            </Link>
+          </div>
+          {overdue.length === 0 ? (
+            <div className="px-4 py-10 text-center text-[12px] text-pewter">
+              Nobody owes you money right now.
+            </div>
+          ) : (
+            <ul className="divide-y divide-mist/50">
+              {overdue.map((row) => (
+                <li key={row.id} className="flex items-center gap-3 px-4 py-2.5">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[12.5px] font-medium text-ink">{row.payeeName}</p>
+                    <p className="text-[11px] text-pewter">
+                      {row.daysOverdue}d overdue
+                      {row.reminders > 0 ? ` · reminded ${row.reminders}×` : " · never reminded"}
+                    </p>
+                  </div>
+                  <Money amount={row.amount} currency={row.currency} className="shrink-0 text-[12.5px] text-ink" />
+                  <button
+                    type="button"
+                    onClick={() => remindNow(row)}
+                    disabled={remindingId === row.id}
+                    className="shrink-0 rounded-lg border border-mist/80 bg-paper px-2.5 py-1.5 text-[11.5px] font-medium text-ink transition-colors hover:bg-fog disabled:opacity-50"
+                  >
+                    {remindingId === row.id ? "Sending…" : "Remind"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
 
         <div className="rounded-xl border border-mist/70 bg-paper">
@@ -231,46 +327,6 @@ function OverviewPage() {
                 Open approval queue <ArrowRight className="h-3 w-3" />
               </Link>
             </div>
-          )}
-        </div>
-
-        <div className="rounded-xl border border-mist/70 bg-paper p-4">
-          <h2 className="text-[13px] font-semibold text-ink">Next run</h2>
-          <div className="mt-3 space-y-2.5">
-            {(data?.schedules ?? []).slice(0, 3).map((schedule) => (
-              <div key={schedule.id} className="flex items-start gap-2">
-                <CalendarClock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-steel" />
-                <div className="min-w-0">
-                  <p className="truncate text-[11.5px] font-medium text-ink">{schedule.title}</p>
-                  <p className="text-[10.5px] text-pewter">
-                    {schedule.status === "PAUSED" ? "Paused" : dateOf(schedule.nextRunAt)}
-                  </p>
-                </div>
-              </div>
-            ))}
-            {(data?.schedules ?? []).length === 0 ? (
-              <p className="text-[11.5px] text-pewter">No schedules seeded yet.</p>
-            ) : null}
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-mist/70 bg-paper p-4">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-            <h2 className="text-[13px] font-semibold text-ink">Safety limits</h2>
-          </div>
-          {config ? (
-            <div className="mt-3 space-y-2 text-[11px] text-graphite">
-              <div className="flex justify-between"><span>Vendor/day</span><strong>{config.vendorDailyCap}</strong></div>
-              <div className="flex justify-between"><span>Global/day</span><strong>{config.globalDailyCap}</strong></div>
-              <div className="flex justify-between"><span>Invoice max</span><strong>{config.invoiceMaxAmount}</strong></div>
-              <div className="flex justify-between"><span>Auto-approve</span><strong>{config.autoApproveMaxAmount}</strong></div>
-              <Link to="/settings" search={{ tab: "policy" }} className="mt-2 inline-flex items-center gap-1 font-medium text-graphite hover:text-ink">
-                View policy <ArrowUpRight className="h-3 w-3" />
-              </Link>
-            </div>
-          ) : (
-            <p className="mt-3 text-[11.5px] text-pewter">Loading policy…</p>
           )}
         </div>
 

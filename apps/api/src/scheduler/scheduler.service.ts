@@ -94,13 +94,23 @@ export class SchedulerService implements OnModuleDestroy {
       payrollCron: this.config.get<string>('PAYROLL_CRON') ?? '0 9 1 * *',
       payrollTimezone: this.config.get<string>('PAYROLL_TIMEZONE') ?? 'UTC',
       payrollEnabled:
-        (this.config.get<string>('PAYROLL_ENABLED') ?? 'true') !== 'false',
+        (this.config.get<string>('PAYROLL_ENABLED') ?? 'false') !== 'false',
       followupCron:
         this.config.get<string>('FOLLOWUP_CRON') ?? '0 */6 * * *',
       followupEnabled:
         (this.config.get<string>('FOLLOWUP_ENABLED') ?? 'false') === 'true',
     })) {
       await this.seed({ ...def, workspaceId: OWNER_WORKSPACE_ID });
+    }
+    // Nov 2026 redesign: payroll is frozen for the solo-earner story. Sunset
+    // any still-ACTIVE legacy payroll seeds (idempotent; explicit
+    // PAYROLL_ENABLED=true re-seeds stay paused unless flipped via API).
+    const sunset = await this.prisma.schedule.updateMany({
+      where: { systemKey: 'payroll.monthly', status: ScheduleStatus.ACTIVE },
+      data: { status: ScheduleStatus.PAUSED },
+    });
+    if (sunset.count > 0) {
+      this.logger.log(`sunset ${sunset.count} legacy payroll schedule(s) to PAUSED`);
     }
   }
 

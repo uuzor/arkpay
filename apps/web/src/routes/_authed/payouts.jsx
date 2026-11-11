@@ -1,7 +1,10 @@
 import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useInfiniteQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { Download } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { apiDownload } from "@/lib/api";
 import StatusPill from "@/components/arkay/StatusPill";
 import Money from "@/components/arkay/Money";
 import PayoutSheet from "@/components/arkay/PayoutSheet";
@@ -20,6 +23,21 @@ export const Route = createFileRoute("/_authed/payouts")({
 function PayoutsPage() {
   const [statusFilter, setStatusFilter] = useState(null);
   const [payoutId, setPayoutId] = useState(null);
+  const [exporting, setExporting] = useState(false);
+
+  const exportCsv = async () => {
+    setExporting(true);
+    try {
+      const day = new Date().toISOString().slice(0, 10);
+      const qs = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : "";
+      await apiDownload(`/payouts/export${qs}`, `arkpay-payouts-${day}.csv`);
+      toast("Export downloaded", { description: "CSV of the filtered payouts." });
+    } catch (e) {
+      toast("Export failed", { description: e?.message ?? "Could not export payouts." });
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const singles = useInfiniteQuery(payoutsInfinite(statusFilter));
   const singleRows = (singles.data?.pages ?? []).flatMap((p) => p?.rows ?? []);
@@ -33,20 +51,30 @@ function PayoutsPage() {
         </p>
       </header>
 
-      <div className="flex flex-wrap gap-1">
-        {ACTION_STATUS_FILTERS.map((f) => (
-          <button
-            key={f.label}
-            type="button"
-            onClick={() => setStatusFilter(f.value)}
-            className={cn(
-              "rounded-lg px-2.5 py-1.5 text-[12px] font-medium transition-colors",
-              statusFilter === f.value ? "bg-ink text-paper" : "bg-paper text-graphite ring-1 ring-inset ring-mist/70 hover:text-ink",
-            )}
-          >
-            {f.label}
-          </button>
-        ))}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap gap-1">
+          {ACTION_STATUS_FILTERS.map((f) => (
+            <button
+              key={f.label}
+              type="button"
+              onClick={() => setStatusFilter(f.value)}
+              className={cn(
+                "rounded-lg px-2.5 py-1.5 text-[12px] font-medium transition-colors",
+                statusFilter === f.value ? "bg-ink text-paper" : "bg-paper text-graphite ring-1 ring-inset ring-mist/70 hover:text-ink",
+              )}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={exportCsv}
+          disabled={exporting}
+          className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-mist/80 bg-paper px-2.5 py-1.5 text-[12px] font-medium text-ink transition-colors hover:bg-fog disabled:opacity-50"
+        >
+          <Download className="h-3.5 w-3.5" /> {exporting ? "Exporting…" : "Export CSV"}
+        </button>
       </div>
 
       {singles.isLoading ? (

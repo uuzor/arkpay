@@ -1,6 +1,6 @@
 const STATS = [
   { value: "20/20", label: "extraction fixtures pass" },
-  { value: "25/25", label: "safety policy tests pass" },
+  { value: "38/38", label: "safety policy tests pass" },
   { value: "6/6", label: "agent chat scenarios pass" },
   { value: "live", label: "PayPal sandbox invoices" },
   { value: "$0", label: "live money moved" },

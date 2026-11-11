@@ -203,7 +203,9 @@ function SchedulesPage() {
   const [openId, setOpenId] = useState(null);
   const [creating, setCreating] = useState(false);
   const { data, isLoading, isError, error } = useQuery(schedulesQuery);
-  const rows = data ?? [];
+  // Payroll prep is frozen for the solo-earner story: hidden here, paused
+  // server-side. The backend still runs rows flipped ACTIVE via API.
+  const rows = (data ?? []).filter((s) => s.kind !== "PAYROLL_PREPARE");
 
   return (
     <div className="space-y-4">

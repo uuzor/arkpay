@@ -108,7 +108,7 @@ export class WorkspacesService {
       payrollCron: this.config.get<string>('PAYROLL_CRON') ?? '0 9 1 * *',
       payrollTimezone: this.config.get<string>('PAYROLL_TIMEZONE') ?? 'UTC',
       payrollEnabled:
-        (this.config.get<string>('PAYROLL_ENABLED') ?? 'true') !== 'false',
+        (this.config.get<string>('PAYROLL_ENABLED') ?? 'false') !== 'false',
       followupCron: this.config.get<string>('FOLLOWUP_CRON') ?? '0 */6 * * *',
       followupEnabled:
         (this.config.get<string>('FOLLOWUP_ENABLED') ?? 'false') === 'true',

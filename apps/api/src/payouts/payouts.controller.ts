@@ -2,15 +2,19 @@ import {
   BadRequestException,
   Controller,
   Get,
+  Header,
   NotFoundException,
   Param,
   Query,
+  Res,
   UseGuards,
 } from '@nestjs/common';
 import { ActionStatus, ActionType, Prisma } from '@prisma/client';
+import type { Response } from 'express';
 import { CurrentWorkspace } from '../auth/current-workspace.decorator';
 import type { RequestSession } from '../auth/session.service';
 import { SessionAuthGuard } from '../auth/session-auth.guard';
+import { csvDocument } from '../common/csv';
 import { PaypalPayoutsService } from '../paypal/paypal-payouts.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -185,6 +189,80 @@ export class PayoutsController {
       statuses,
       members,
     };
+  }
+
+  /**
+   * CSV export of single payouts for the dashboard Export button. Same
+   * tenant scoping and status filter as the list; capped at 2000 newest
+   * rows. Declared before `:id` so `export` matches here.
+   */
+  @Get('export')
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  async exportCsv(
+    @CurrentWorkspace() workspace: RequestSession['workspace'],
+    @Query('status') status: string | undefined,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<string> {
+    if (
+      status &&
+      !Object.values(ActionStatus).includes(status as ActionStatus)
+    ) {
+      throw new BadRequestException(
+        `invalid status: ${status} (want ${Object.values(ActionStatus).join(', ')})`,
+      );
+    }
+    const rows = await this.prisma.action.findMany({
+      where: {
+        workspaceId: workspace.id,
+        type: ActionType.PAYOUT_SINGLE,
+        ...(status ? { status: status as ActionStatus } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 2000,
+      select: {
+        id: true,
+        createdAt: true,
+        status: true,
+        payeeName: true,
+        payeePaypal: true,
+        amount: true,
+        currency: true,
+        purpose: true,
+        paypalRef: true,
+        policyVerdict: true,
+      },
+    });
+    const day = new Date().toISOString().slice(0, 10);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="arkpay-payouts-${day}.csv"`,
+    );
+    return csvDocument(
+      [
+        'id',
+        'created_at',
+        'status',
+        'payee_name',
+        'payee_paypal',
+        'amount',
+        'currency',
+        'purpose',
+        'paypal_ref',
+        'policy_verdict',
+      ],
+      rows.map((r) => [
+        r.id,
+        r.createdAt,
+        r.status,
+        r.payeeName,
+        r.payeePaypal,
+        String(r.amount),
+        r.currency,
+        r.purpose,
+        r.paypalRef,
+        r.policyVerdict,
+      ]),
+    );
   }
 
   /**

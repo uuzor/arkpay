@@ -60,7 +60,7 @@ export default function SafetySection() {
             <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-steel">Decision</p>
             <p className="mt-1 text-[13px] font-semibold text-ink">Manual approval required</p>
             <p className="mt-1 text-[12px] leading-5 text-graphite">
-              Payee details changed on a known vendor. The card shows what changed and locks the old approval.
+              Payee details changed on a known contact. The card shows what changed and locks the old approval.
             </p>
           </div>
         </div>

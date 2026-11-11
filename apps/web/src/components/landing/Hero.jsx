@@ -40,7 +40,7 @@ export default function Hero() {
               <span className="grid h-7 w-7 place-items-center rounded-full bg-ink text-paper">
                 <Play className="ml-0.5 h-3 w-3 fill-current" />
               </span>
-              See how it works (2:00)
+              See how it works
             </a>
           </div>
 

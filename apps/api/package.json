@@ -15,6 +15,7 @@
     "test:scheduler:e2e": "nest build && dotenv -e ../../.env -- node ../../scripts/test-scheduler-e2e.cjs",
     "test:agent": "tsc -p tsconfig.agent.json && node --test dist-agent/agent-tools.spec.js",
     "test:billing": "tsc -p tsconfig.billing.json && node --test dist-billing/billing-analysis.spec.js",
+    "test:csv": "tsc -p tsconfig.csv.json && node --test dist-csv/csv.spec.js",
     "test:predraft": "tsc -p tsconfig.predraft.json && node --test dist-predraft/predraft.spec.js",
     "test:payouts:mock": "nest build && dotenv -e ../../.env -- node ../../scripts/test-payouts-mock.cjs",
     "test:agent-chat": "nest build && dotenv -e ../../.env -- node ../../scripts/test-agent-chat.cjs",

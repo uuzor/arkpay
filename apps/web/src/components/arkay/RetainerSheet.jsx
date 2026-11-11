@@ -47,12 +47,12 @@ export default function RetainerSheet({ subscriptionId, open, onOpenChange }) {
       onOpenChange={onOpenChange}
       title={sub?.subscriberName || sub?.subscriberEmail || "Subscription"}
     >
-      {detail.isLoading ? (
-        <div className="h-40 animate-pulse rounded-xl bg-fog" />
-      ) : detail.isError ? (
+      {detail.isError ? (
         <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-[12.5px] text-red-800">
           Could not load subscription: {detail.error?.message ?? "unknown error"}
         </div>
+      ) : detail.isLoading || !sub ? (
+        <div className="h-40 animate-pulse rounded-xl bg-fog" />
       ) : (
         <>
           <header className="flex flex-wrap items-start justify-between gap-3">

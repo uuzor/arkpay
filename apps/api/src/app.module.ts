@@ -8,6 +8,7 @@ import { ContactsModule } from './contacts/contacts.module';
 import { HealthController } from './health.controller';
 import { IngestModule } from './ingest/ingest.module';
 import { LlmModule } from './llm/llm.module';
+import { OverviewModule } from './overview/overview.module';
 import { PaypalModule } from './paypal/paypal.module';
 import { WebhooksModule } from './paypal/webhooks/webhooks.module';
 import { PayoutsModule } from './payouts/payouts.module';
@@ -40,6 +41,7 @@ import { TelegramModule } from './telegram/telegram.module';
     LlmModule,
     ContactsModule,
     TelegramModule,
+    OverviewModule,
   ],
   controllers: [HealthController],
 })

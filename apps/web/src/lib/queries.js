@@ -274,6 +274,12 @@ export function billingDisputeDetailQuery(id) {
   });
 }
 
+export const financeQuery = queryOptions({
+  queryKey: ["overview", "finance"],
+  queryFn: () => apiJson("/overview/finance"),
+  staleTime: 15_000,
+});
+
 export const overviewQuery = queryOptions({
   queryKey: ["overview"],
   queryFn: async () => {
